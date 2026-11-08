@@ -118,11 +118,11 @@ export async function runTier2(intent: PaymentIntent, priorFlags: string[], cfg:
         type: "plan",
         payload: buildReppoPayload(intent, priorFlags),
         criteria: REPPO_CRITERIA,
-        context: "Countersign tier-2 review of an autonomous agent payment. Judge only the facts given.",
+        context: "Tripwire tier-2 review of an autonomous agent payment. Judge only the facts given.",
       }),
     });
     if (!res.ok) throw new Error(`Reppo HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`);
-    const body = await res.json();
+    const body: any = await res.json();
     const v = extractVerdict(body);
     return toStep(v, cfg.sandbox ? 0 : cfg.costUsd, Date.now() - started, cfg.sandbox ? "sandbox" : "live", {
       evalId: body.evalId,

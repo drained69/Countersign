@@ -1,15 +1,44 @@
 {
-  "name": "countersign",
-  "version": "0.1.0",
-  "description": "Tiered co-signer for Kite agent allowances: code rules -> SERV reasoning -> Reppo verdict -> human passkey step-up.",
-  "type": "module",
+  "name": "tripwire",
+  "version": "1.0.0",
+  "description": "Tiered co-signer for AI agent payments on Kite: code rules, SERV reasoning, a Reppo network verdict and a Kite passkey step-up, with a receipt for every decision.",
+  "keywords": [
+    "kite",
+    "agent-payments",
+    "x402",
+    "openserv",
+    "serv",
+    "reppo",
+    "mcp",
+    "ai-agents",
+    "security"
+  ],
+  "homepage": "https://github.com/drained69/Tripwire#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/drained69/Tripwire.git"
+  },
+  "bugs": {
+    "url": "https://github.com/drained69/Tripwire/issues"
+  },
   "license": "MIT",
-  "engines": { "node": ">=23.6" },
+  "type": "module",
+  "private": true,
+  "engines": {
+    "node": ">=23.6"
+  },
   "scripts": {
     "start": "node src/server.ts",
     "demo": "node scripts/demo.ts",
     "replay": "node scripts/replay.ts",
     "mcp": "node src/mcp.ts",
-    "test": "node --test --test-timeout=30000 \"test/**/*.test.ts\""
+    "doctor": "node scripts/doctor.ts",
+    "test": "node --test --test-timeout=30000 \"test/**/*.test.ts\"",
+    "typecheck": "tsc -p .",
+    "check": "npm run typecheck && npm test"
+  },
+  "devDependencies": {
+    "@types/node": "25.9.9",
+    "typescript": "5.9.3"
   }
 }

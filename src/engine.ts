@@ -2,23 +2,27 @@
 // Verification gets stricter as the amount at risk grows; any "block" stops the payment,
 // any "escalate" moves it up a rung. Nothing is paid until the receipt says "approved".
 import { Calibration } from "./calibration.ts";
-import { executePayment, lookupDirectory, pollStepUp, requestStepUp, type KiteMode } from "./adapters/kite.ts";
-import { runTier0 } from "./tiers/tier0.ts";
+import { DEFAULT_KITE, executePayment, lookupDirectory, pollStepUp, recheckPayment, requestStepUp, type KiteMode, type KiteOptions } from "./adapters/kite.ts";
+import { quotePrice } from "./adapters/x402.ts";
+import { PRICE_UNVERIFIED, runTier0 } from "./tiers/tier0.ts";
+import { randomUUID } from "node:crypto";
 import { runTier1, type ServConfig } from "./tiers/tier1Serv.ts";
 import { runTier2, type ReppoConfig } from "./tiers/tier2Reppo.ts";
-import type { PaymentIntent, Policy, Receipt, StepRecord } from "./types.ts";
+import type { PaymentIntent, PaymentResult, Policy, Receipt, StepRecord } from "./types.ts";
 
 export interface EngineConfig {
   policy: Policy;
   serv: ServConfig;
   reppo: ReppoConfig;
   kiteMode: KiteMode;
+  /** Where live payments are paid from. */
+  kite?: KiteOptions;
   /** Execute the Kite payment after approval. Replays turn this off. */
   executePayments: boolean;
 }
 
 /** Tier-0 flags that force at least a Reppo review regardless of amount or calibration. */
-const SERIOUS = /looks like|instructions aimed|duplicate charge|above 80%|Unusual amount|Split payment|not listed in Kite|Outside .* allowed purchases|Would overdraw/i;
+const SERIOUS = /Couldn't confirm the merchant's price|looks like|instructions aimed|duplicate charge|above 80%|Unusual amount|Split payment|not listed in Kite|Outside .* allowed purchases|Would overdraw/i;
 
 export function planTier(
   amountUsd: number,
@@ -32,6 +36,8 @@ export function planTier(
   else if (amountUsd >= thresholds.tier1MinUsd) tier = 1;
   if (!payeeKnown && tier < 1) tier = 1;
   if (tier0.reasons.some((r) => SERIOUS.test(r))) tier = 2;
+  // An unconfirmed price is only safe through a passkey session capped at the requested amount.
+  if (tier0.reasons.some((r) => r.startsWith(PRICE_UNVERIFIED))) return 3;
   return tier;
 }
 
@@ -44,21 +50,26 @@ export class Engine {
   private humanWaiters = new Map<string, (a: HumanAnswer) => void>();
   /** One-shot Kite sessions the owner approved, keyed by intent id; the payment executes through them. */
   private stepUpSessions = new Map<string, string>();
-  onChange?: (r: Receipt) => void;
+  /** Called on every receipt change. `durable` asks for an immediate write (before money moves). */
+  onChange?: (r: Receipt, durable?: boolean) => void;
+  /** Called when a payment needs the owner's answer. */
+  onHumanNeeded?: (r: Receipt, approvalUrl?: string) => void;
 
   constructor(cfg: EngineConfig, calibration = new Calibration()) {
     this.cfg = cfg;
     this.calibration = calibration;
   }
 
-  spentUsd(): number {
+  /** Money that has left, or may have left, the allowance. Unknown and held payments count until resolved. */
+  spentUsd(now = new Date()): number {
+    const since = periodStart(this.cfg.policy.resetPeriod, now);
     let total = 0;
-    for (const r of this.receipts.values()) if (r.status === "approved") total += r.intent.amountUsd;
+    for (const r of this.receipts.values()) {
+      // Payments still in flight always count; settled ones count in the period they were decided.
+      const settled = r.status === "approved" ? Date.parse(r.decidedAt ?? r.intent.createdAt) : Infinity;
+      if (settled >= since) total += committedUsd(r);
+    }
     return total;
-  }
-
-  private approvedHistory(): PaymentIntent[] {
-    return [...this.receipts.values()].filter((r) => r.status === "approved").map((r) => r.intent);
   }
 
   private effectivePolicy(): Policy {
@@ -73,21 +84,64 @@ export class Engine {
     this.onChange?.(r);
   }
 
-  /** Run the ladder for one intent. Resolves once the receipt is approved or blocked. */
+  /**
+   * Run the ladder for one intent. Resolves once the receipt reaches a final state; never rejects.
+   * An unexpected error fails closed: before payment it blocks, and during payment the outcome becomes
+   * "payment_unknown" (still counted against the allowance), because money may already have moved.
+   */
   async decide(intent: PaymentIntent): Promise<Receipt> {
+    // Register the payment before anything awaits, so payments arriving meanwhile see it as in flight
+    // (duplicates, splits, reserved allowance) and a retried requestKey finds it.
+    const receipt: Receipt = { intent, status: "pending_network", steps: [], verificationCostUsd: 0, plannedTier: 0 };
+    this.receipts.set(intent.id, receipt);
+    try {
+      return await this.climb(receipt);
+    } catch (err) {
+      const message = `Internal error, failing closed: ${(err as Error)?.message ?? String(err)}`;
+      this.humanWaiters.delete(intent.id);
+      this.stepUpSessions.delete(intent.id);
+      const mode = this.cfg.kiteMode === "kpass" ? "live" : "mock";
+      if (receipt.status === "paying") {
+        receipt.status = "payment_unknown";
+        receipt.payment = { ...(receipt.payment ?? { executed: false, mode }), executed: false, state: "unknown", error: `${message}. The payment may have gone through; recheck it.` };
+      } else {
+        receipt.status = "blocked";
+        receipt.payment = { executed: false, state: "not_paid", mode, error: message };
+      }
+      receipt.decidedAt ??= new Date().toISOString();
+      this.emit(receipt);
+      return receipt;
+    }
+  }
+
+  private async climb(receipt: Receipt): Promise<Receipt> {
+    const { intent } = receipt;
     const policy = this.effectivePolicy();
-    const inFlight = [...this.receipts.values()].filter((r) => r.status.startsWith("pending")).map((r) => r.intent);
     const known = policy.knownPayees.some((k) => k.payee === intent.payee);
     // Known payees are already on the allowlist; only new ones are looked up in Kite's directory.
-    const directory = known ? undefined : await lookupDirectory(intent, this.cfg.kiteMode);
-    const tier0 = runTier0(intent, { policy, spentUsd: this.spentUsd(), history: this.approvedHistory(), inFlight, directory });
+    const live = this.cfg.kiteMode === "kpass";
+    const [directory, quote] = await Promise.all([
+      known ? undefined : lookupDirectory(intent, this.cfg.kiteMode),
+      // Live payments only: the merchant's own price for this exact request.
+      live && intent.url ? quotePrice(intent) : undefined,
+    ]);
+    const others = [...this.receipts.values()].filter((r) => r.intent.id !== intent.id);
+    const tier0 = runTier0(intent, {
+      policy,
+      spentUsd: this.spentUsd(),
+      history: others.filter((r) => committedUsd(r) > 0).map((r) => r.intent),
+      // Everything still being checked, including payments that arrived while this one was being looked up.
+      inFlight: others.filter((r) => r.status.startsWith("pending")).map((r) => r.intent),
+      directory,
+      quote,
+    });
     const payeeKnown = policy.knownPayees.some((k) => k.payee === intent.payee);
     const thresholds = this.calibration.thresholds(intent.payee, policy);
     const plannedTier = planTier(intent.amountUsd, tier0, thresholds, payeeKnown);
     tier0.detail = { ...tier0.detail, thresholds };
 
-    const receipt: Receipt = { intent, status: "pending_network", steps: [tier0], verificationCostUsd: 0, plannedTier };
-    this.receipts.set(intent.id, receipt);
+    receipt.steps.push(tier0);
+    receipt.plannedTier = plannedTier;
     this.emit(receipt);
 
     if (tier0.outcome === "block") return this.finish(receipt, "blocked");
@@ -96,14 +150,17 @@ export class Engine {
     const flags = () => receipt.steps.filter((s) => s.outcome !== "pass").flatMap((s) => s.reasons);
 
     if (next === 1) {
-      const s1 = await runTier1(intent, this.cfg.serv);
+      const s1 = live && !this.cfg.serv.apiKey ? notConfigured(1, "SERV task check", "llm", "SERV_API_KEY") : await runTier1(intent, this.cfg.serv);
       this.push(receipt, s1);
       if (s1.outcome === "block") return this.finish(receipt, "blocked");
       next = s1.outcome === "escalate" || plannedTier >= 2 ? 2 : "done";
     }
 
     if (next === 2) {
-      const s2 = await runTier2(intent, flags(), this.cfg.reppo);
+      // Reppo's sandbox returns placeholder verdicts, so it never stands in for review of a real payment.
+      const s2 = live && !(this.cfg.reppo.creditToken && !this.cfg.reppo.sandbox)
+        ? notConfigured(2, "Reppo network verdict", "network", "REPPO_CREDIT_TOKEN (with REPPO_SANDBOX=false)")
+        : await runTier2(intent, flags(), this.cfg.reppo);
       this.push(receipt, s2);
       if (s2.outcome === "block") {
         this.calibration.recordIncident(intent.payee);
@@ -111,14 +168,15 @@ export class Engine {
       }
       if (s2.outcome === "pass") {
         this.calibration.recordClean(intent.payee);
-        next = "done";
+        next = plannedTier === 3 ? 3 : "done";
       } else next = 3;
     }
 
     if (next === 3) {
       const answer = await this.askHuman(receipt);
-      if (answer === "declined") {
-        this.calibration.recordIncident(intent.payee);
+      if (answer !== "approved") {
+        // A Kite failure says nothing about the payee; only the owner's decline is an incident.
+        if (answer === "declined") this.calibration.recordIncident(intent.payee);
         return this.finish(receipt, "blocked");
       }
       this.calibration.recordClean(intent.payee, { humanApprovedNewPayee: !payeeKnown });
@@ -133,7 +191,7 @@ export class Engine {
     this.emit(receipt);
   }
 
-  private async askHuman(receipt: Receipt): Promise<HumanAnswer> {
+  private async askHuman(receipt: Receipt): Promise<HumanAnswer | "failed"> {
     receipt.status = "pending_human";
     const started = Date.now();
     let req;
@@ -141,11 +199,12 @@ export class Engine {
       req = await requestStepUp(receipt.intent, this.cfg.kiteMode);
     } catch (err) {
       this.push(receipt, humanStep("declined", [`Could not open a Kite step-up session: ${(err as Error).message}`], started, this.cfg.kiteMode));
-      return "declined";
+      return "failed";
     }
     const pending = humanStep("escalate", [req.approvalHint], started, this.cfg.kiteMode);
-    pending.detail = { requestId: req.requestId };
+    pending.detail = { requestId: req.requestId, approvalUrl: req.approvalUrl, expiresAt: req.expiresAt };
     this.push(receipt, pending);
+    this.onHumanNeeded?.(receipt, req.approvalUrl);
 
     const answer = await new Promise<HumanAnswer>((resolve) => {
       this.humanWaiters.set(receipt.intent.id, resolve);
@@ -160,6 +219,7 @@ export class Engine {
   }
 
   private async pollKite(id: string, requestId: string) {
+    // Kite's approval link expires after about 10 minutes; wait a little longer than that.
     const deadline = Date.now() + 15 * 60_000;
     while (this.humanWaiters.has(id) && Date.now() < deadline) {
       try {
@@ -189,20 +249,86 @@ export class Engine {
     // Final guard: payments approved while this one was being checked may have used up the allowance.
     if (status === "approved" && this.spentUsd() + receipt.intent.amountUsd > this.cfg.policy.allowanceUsd + 1e-9) {
       status = "blocked";
-      receipt.payment = { executed: false, mode: this.cfg.kiteMode === "kpass" ? "live" : "mock", error: "Allowance used up by payments approved while this one was being checked." };
+      receipt.payment = { executed: false, state: "not_paid", mode: this.cfg.kiteMode === "kpass" ? "live" : "mock", error: "Allowance used up by payments approved while this one was being checked." };
     }
-    receipt.status = status;
     receipt.decidedAt = new Date().toISOString();
     receipt.verificationCostUsd = receipt.steps.reduce((a, s) => a + s.costUsd, 0);
-    if (status === "approved" && this.cfg.executePayments) {
-      const sessionId = this.stepUpSessions.get(receipt.intent.id);
-      this.stepUpSessions.delete(receipt.intent.id);
-      receipt.payment = await executePayment(receipt.intent, this.cfg.kiteMode, { sessionId });
-      if (!receipt.payment.executed) receipt.status = "blocked";
+    if (status === "blocked" || !this.cfg.executePayments) {
+      receipt.status = status;
+      this.emit(receipt);
+      return receipt;
     }
-    this.emit(receipt);
+
+    // Record the attempt (and its idempotency key) durably before any money moves.
+    const sessionId = this.stepUpSessions.get(receipt.intent.id);
+    this.stepUpSessions.delete(receipt.intent.id);
+    const idempotencyKey = randomUUID();
+    receipt.status = "paying";
+    receipt.payment = { executed: false, state: "unknown", mode: this.cfg.kiteMode === "kpass" ? "live" : "mock", idempotencyKey, sessionId };
+    this.onChange?.(receipt, true);
+
+    const result = await executePayment(receipt.intent, this.cfg.kiteMode, { sessionId, idempotencyKey, kite: this.cfg.kite ?? DEFAULT_KITE });
+    this.applyPayment(receipt, result);
     return receipt;
   }
+
+  private applyPayment(receipt: Receipt, result: PaymentResult) {
+    receipt.payment = result;
+    receipt.status = result.state === "paid" ? "approved" : result.state === "not_paid" ? "blocked" : "payment_unknown";
+    if (result.amountUsd !== undefined && result.amountUsd > receipt.intent.amountUsd + 1e-6) {
+      receipt.payment.error = `Kite reports $${result.amountUsd.toFixed(4)} paid, more than the $${receipt.intent.amountUsd.toFixed(2)} approved.${result.error ? ` ${result.error}` : ""}`;
+      this.calibration.recordIncident(receipt.intent.payee);
+    }
+    this.emit(receipt);
+  }
+
+  /** Ask Kite again about a payment whose outcome was unknown or held. Never pays twice. */
+  async recheck(id: string): Promise<Receipt | undefined> {
+    const r = this.receipts.get(id);
+    if (!r || r.status !== "payment_unknown" || !r.payment) return r;
+    if (this.cfg.kiteMode !== "kpass") return r;
+    const result = await recheckPayment(r.intent, r.payment, this.cfg.kite ?? DEFAULT_KITE);
+    this.applyPayment(r, result);
+    return r;
+  }
+
+  /** The owner settles an unknown outcome after checking Kite's Activity page. */
+  resolve(id: string, answer: "paid" | "not_paid"): Receipt | undefined {
+    const r = this.receipts.get(id);
+    if (!r || r.status !== "payment_unknown" || !r.payment) return undefined;
+    r.payment = { ...r.payment, executed: answer === "paid", state: answer, error: `${r.payment.error ? `${r.payment.error} ` : ""}Resolved by the owner as ${answer === "paid" ? "paid" : "not paid"}.` };
+    r.status = answer === "paid" ? "approved" : "blocked";
+    this.emit(r);
+    return r;
+  }
+}
+
+/** Start of the current allowance period in UTC (weeks start Monday). */
+export function periodStart(period: Policy["resetPeriod"], now = new Date()): number {
+  if (period === "monthly") return Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1);
+  if (period === "weekly") {
+    const day = (now.getUTCDay() + 6) % 7;
+    return Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - day);
+  }
+  return -Infinity;
+}
+
+/** What a receipt takes out of the allowance: paid, being paid, or possibly paid. */
+export function committedUsd(r: Receipt): number {
+  if (r.status === "approved" && r.payment?.state === "paid" && r.payment.amountUsd !== undefined) return r.payment.amountUsd;
+  if (r.status === "approved" || r.status === "paying" || r.status === "payment_unknown") {
+    return Math.max(r.payment?.amountUsd ?? 0, r.intent.amountUsd);
+  }
+  return 0;
+}
+
+/** Live payments never rely on an offline stand-in: an unconfigured check hands the decision to the owner. */
+function notConfigured(tier: 1 | 2, name: string, kind: "llm" | "network", key: string): StepRecord {
+  return {
+    tier, name, kind, outcome: "escalate", costUsd: 0, latencyMs: 0, mode: "live",
+    reasons: [`${name} is not configured (${key}), so the owner decides this payment.`],
+    detail: { notConfigured: true },
+  };
 }
 
 function humanStep(outcome: "approved" | "declined" | "escalate", reasons: string[], started: number, mode: KiteMode): StepRecord {

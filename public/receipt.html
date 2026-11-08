@@ -3,17 +3,18 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Countersign receipt</title>
+  <title>Tripwire receipt</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600&family=IBM+Plex+Mono:wght@400;500;600&family=Space+Grotesk:wght@300;400;500&display=swap" />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap" />
+  <link rel="icon" href="/mark.svg" type="image/svg+xml" />
   <link rel="stylesheet" href="/styles.css" />
   <script src="/shell.js"></script>
 </head>
 <body>
 <header class="nav">
   <div class="container">
-    <a class="wordmark" href="/">Countersign</a>
+    <a class="brand" href="/"><svg class="mark" viewBox="0 0 28 28" aria-hidden="true"><rect width="28" height="28" rx="7"/><path d="M4.5 17.5h5.5l2.6-7 3.2 10 2.6-6.5h5.1"/></svg><span class="wordmark">Tripwire</span></a>
     <nav class="nav-links" aria-label="Primary">
       <a href="/">Dashboard</a>
       <a href="/#replay" class="hide-xs">Replay</a>
@@ -25,13 +26,13 @@
 
 <main>
   <section class="hero">
-    <div class="container" style="padding-top:44px;padding-bottom:40px">
+    <div class="hero-card compact">
       <div class="crumbs"><a href="/">Dashboard</a> / Receipt / <span id="rid"></span></div>
-      <div class="receipt-head" style="margin-top:22px">
+      <div class="receipt-head">
         <div>
-          <span class="eyebrow" id="eyebrow">Receipt</span>
-          <h1 class="display" style="font-size:clamp(40px,6vw,64px);margin-top:16px" id="amount">…</h1>
-          <p class="lead" style="margin-top:10px" id="payee"></p>
+          <span class="live-label" id="eyebrow"><i></i>Receipt</span>
+          <h1 class="display" id="amount">…</h1>
+          <p class="lead" id="payee"></p>
         </div>
         <span id="status"></span>
       </div>
@@ -65,91 +66,20 @@
 </main>
 
 <footer class="footer">
-  <div class="container">
-    <div><a class="wordmark" href="/">Countersign</a><p>Every decision ships with a receipt like this one: what ran, what it cost, which mode answered and why.</p></div>
-    <nav aria-label="Footer"><a href="/docs#receipts">About receipts</a><a href="/docs#api">API reference</a></nav>
+  <div class="footer-card">
+    <div class="footer-grid">
+      <div class="footer-brand">
+        <a class="brand" href="/"><svg class="mark" viewBox="0 0 28 28" aria-hidden="true"><rect width="28" height="28" rx="7"/><path d="M4.5 17.5h5.5l2.6-7 3.2 10 2.6-6.5h5.1"/></svg><span class="wordmark">Tripwire</span></a>
+        <p>A tripwire between your agents' Kite allowance and every payment: code rules, SERV reasoning, a Reppo verdict and your passkey, with a receipt for every decision.</p>
+      </div>
+      <nav aria-label="Product"><span class="label">Product</span><a href="/">Dashboard</a><a href="/#policy-editor">Plain-English policy</a><a href="/#replay">Replay</a><a href="/#connect">Connect an agent</a></nav>
+      <nav aria-label="Docs"><span class="label">Docs</span><a href="/docs#quickstart">Quickstart</a><a href="/docs#live">Going live</a><a href="/docs#api">API reference</a><a href="/docs#security">Security model</a></nav>
+      <nav aria-label="Built on"><span class="label">Built on</span><a href="https://openserv.ai" rel="noopener">OpenServ SERV ↗</a><a href="https://reppo.xyz" rel="noopener">Reppo ↗</a><a href="https://gokite.ai" rel="noopener">Kite Agent Passport ↗</a></nav>
+    </div>
+    <div class="footer-base"><span>© 2026 Tripwire</span><span>Agents spend · bad payments trip the wire</span></div>
   </div>
 </footer>
 
-<script type="module">
-  const { esc, usd, tierName } = window.CS;
-  const $ = (id) => document.getElementById(id);
-  const STATUS = { approved: "Approved", blocked: "Blocked", pending_human: "Waiting for you", pending_network: "Checking" };
-  const id = location.pathname.split("/").pop();
-  $("rid").textContent = id;
-
-  /** Sponsor-specific evidence recorded on a step. */
-  function facts(s) {
-    const d = s.detail ?? {};
-    const out = [];
-    if (d.promptGuard) out.push(`PromptGuard: ${d.promptGuard}`);
-    if (d.servTools) out.push(`SERV tools: ${d.servTools.join(", ")}`);
-    if (d.kiteDirectory) {
-      const k = d.kiteDirectory;
-      out.push(k.listed ? `Kite directory: listed${k.serviceId ? ` (${k.serviceId})` : ""}` : k.error ? "Kite directory: lookup failed" : "Kite directory: not listed");
-    }
-    if (d.splitTotalUsd) out.push(`split total ${usd(d.splitTotalUsd)}`);
-    if (d.evalId) out.push(`Reppo eval ${d.evalId}`);
-    if (d.requestId) out.push(`Kite session request ${d.requestId}`);
-    return out.map((x) => `<span>${esc(x)}</span>`).join("");
-  }
-
-  async function load() {
-    const res = await fetch(`/api/receipts/${encodeURIComponent(id)}`);
-    if (!res.ok) {
-      $("amount").textContent = "Receipt not found";
-      $("payee").textContent = "It may have been cleared by a demo reset.";
-      return;
-    }
-    const r = await res.json();
-    const i = r.intent;
-    document.title = `${usd(i.amountUsd)} to ${i.payeeName} · Countersign receipt`;
-    $("eyebrow").textContent = `Receipt · ${i.agentId}`;
-    $("amount").textContent = usd(i.amountUsd);
-    $("payee").innerHTML = `to <b style="color:var(--ink)">${esc(i.payeeName)}</b> <span class="mono">${esc(i.payee)}</span>`;
-    $("status").innerHTML = `<span class="pill ${r.status}">${STATUS[r.status]}</span>`;
-    $("stepCount").textContent = `${r.steps.length} of 4 tiers · planned ${r.plannedTier}`;
-
-    $("steps").innerHTML = r.steps.map((s) => `<li>
-      <span class="node ${s.kind}">${s.tier}</span>
-      <div class="t-head"><b>${esc(s.name)}</b><span class="outcome ${s.outcome}">${s.tier === 3 && s.outcome === "escalate" && r.status === "pending_human" ? "waiting" : s.outcome}</span></div>
-      <div class="t-facts">
-        <span>${tierName[s.tier]}</span><span>${s.kind}</span><span>${s.mode}</span>
-        <span>${usd(s.costUsd)}${s.mode === "mock" && s.detail?.liveCostUsd ? ` · ≈${usd(s.detail.liveCostUsd)} live` : ""}</span>
-        <span>${s.latencyMs.toLocaleString()} ms</span>
-        ${facts(s)}
-      </div>
-      <ul class="reasons">${s.reasons.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>
-    </li>`).join("");
-
-    const pm = r.payment;
-    const pay = pm
-      ? `${pm.executed ? "Executed" : "Failed"} · ${pm.mode}${pm.ref || pm.error ? ` · ${esc(pm.ref ?? pm.error)}` : ""}`
-      : r.status === "approved" ? "Not executed" : "Not paid";
-    const fmt = (d) => (d ? new Date(d).toLocaleString() : "—");
-    $("summary").innerHTML = `
-      <dt>Status</dt><dd>${STATUS[r.status]}</dd>
-      <dt>Amount</dt><dd>${usd(i.amountUsd)}</dd>
-      <dt>Category</dt><dd>${esc(i.category)}</dd>
-      <dt>Cost of checks</dt><dd>${usd(r.verificationCostUsd)}</dd>
-      <dt>Kite payment</dt><dd>${pay}</dd>
-      <dt>Requested</dt><dd>${fmt(i.createdAt)}</dd>
-      <dt>Decided</dt><dd>${r.decidedAt ? fmt(r.decidedAt) : "pending"}</dd>
-      ${i.url ? `<dt>Endpoint</dt><dd>${esc(i.method ?? "GET")} ${esc(i.url)}</dd>` : ""}
-      ${pm?.sessionId ? `<dt>Step-up session</dt><dd>${esc(pm.sessionId)}</dd>` : ""}
-      ${pm?.txHash ? `<dt>Transaction</dt><dd>${esc(pm.txHash)}</dd>` : ""}
-      ${pm?.explorerUrl && /^https:\/\//.test(pm.explorerUrl) ? `<dt>Explorer</dt><dd><a href="${esc(pm.explorerUrl)}" target="_blank" rel="noopener">View on Kite →</a></dd>` : ""}`;
-
-    const block = (label, body, warn) => `<div><div class="label" style="margin-bottom:6px${warn ? ";color:var(--bad)" : ""}">${label}</div><div style="color:var(--ink-2)">${body}</div></div>`;
-    $("context").innerHTML = [
-      block("Agent task", esc(i.agentTask)),
-      block("Stated purpose", esc(i.purpose)),
-      i.vendorText ? block("Vendor text · untrusted, never obeyed", `<span class="mono">${esc(i.vendorText)}</span>`, true) : "",
-    ].join("");
-    $("raw").textContent = JSON.stringify(r, null, 2);
-    if (r.status.startsWith("pending")) setTimeout(load, 2000);
-  }
-  load();
-</script>
+<script src="/receipt.js" type="module"></script>
 </body>
 </html>

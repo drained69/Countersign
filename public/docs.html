@@ -3,18 +3,19 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Countersign Docs</title>
-  <meta name="description" content="How Countersign checks agent payments: the four-tier ladder, routing, calibration, receipts, API and configuration." />
+  <title>Tripwire Docs</title>
+  <meta name="description" content="How Tripwire checks agent payments: the four-tier ladder, routing, calibration, receipts, API and configuration." />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600&family=IBM+Plex+Mono:wght@400;500;600&family=Space+Grotesk:wght@300;400;500&display=swap" />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap" />
+  <link rel="icon" href="/mark.svg" type="image/svg+xml" />
   <link rel="stylesheet" href="/styles.css" />
   <script src="/shell.js"></script>
 </head>
 <body>
 <header class="nav">
   <div class="container">
-    <a class="wordmark" href="/">Countersign</a>
+    <a class="brand" href="/"><svg class="mark" viewBox="0 0 28 28" aria-hidden="true"><rect width="28" height="28" rx="7"/><path d="M4.5 17.5h5.5l2.6-7 3.2 10 2.6-6.5h5.1"/></svg><span class="wordmark">Tripwire</span></a>
     <nav class="nav-links" aria-label="Primary">
       <a href="/">Dashboard</a>
       <a href="/#replay" class="hide-xs">Replay</a>
@@ -24,18 +25,18 @@
   </div>
 </header>
 
-<div class="hero">
-  <div class="container doc-hero">
-    <span class="eyebrow">Documentation</span>
-    <h1 class="display" style="font-size:clamp(36px,5vw,56px);margin-top:18px">Countersign docs</h1>
-    <p class="lead" style="margin:16px 0 44px">How the ladder decides, how to send it payments, and how to connect SERV, Reppo and Kite.</p>
+<section class="hero">
+  <div class="hero-card compact">
+    <span class="live-label"><i></i>Documentation</span>
+    <h1 class="display">Tripwire docs</h1>
+    <p class="lead">How the ladder decides, how to send it payments, how to go live, and how to connect SERV, Reppo and Kite.</p>
   </div>
-</div>
+</section>
 
 <div class="container docs">
   <nav class="docs-nav" aria-label="Documentation" id="docsNav">
     <div class="group"><span class="label">Get started</span>
-      <a href="#overview">Overview</a><a href="#quickstart">Quickstart</a><a href="#demo">The stage demo</a>
+      <a href="#overview">Overview</a><a href="#quickstart">Quickstart</a><a href="#live">Going live</a><a href="#demo">The stage demo</a>
     </div>
     <div class="group"><span class="label">How it works</span>
       <a href="#ladder">The ladder</a><a href="#tier-0">Tier 0 · Code rules</a><a href="#tier-1">Tier 1 · SERV</a>
@@ -56,7 +57,7 @@
       <span class="eyebrow">Get started</span>
       <h2>Overview</h2>
       <p>Kite's Agent Passport lets a team give its agents a standing allowance. Caps limit <em>how much</em> an agent can spend, but nothing checks <em>whether a particular payment is right</em>: the right vendor, the right amount, for the task the agent was given.</p>
-      <p><strong>Countersign sits between the allowance and every payment.</strong> Each payment climbs a ladder of checks. Cheap checks run on everything, and expensive ones only run when more money is at risk or something looks wrong:</p>
+      <p><strong>Tripwire sits between the allowance and every payment.</strong> Each payment climbs a ladder of checks. Cheap checks run on everything, and expensive ones only run when more money is at risk or something looks wrong:</p>
       <table class="doc-table">
         <thead><tr><th>Tier</th><th>Who checks</th><th>Runs when</th><th>Cost</th></tr></thead>
         <tbody>
@@ -72,15 +73,58 @@
     <section id="quickstart">
       <span class="eyebrow">Get started</span>
       <h2>Quickstart</h2>
-      <p>Countersign needs <strong>Node 23.6 or newer</strong>. Node runs the TypeScript directly, so there are no dependencies to install and no build step.</p>
-      <div class="codeblock"><div class="cb-head"><span class="label">shell</span><button class="copy">Copy</button></div><pre>git clone https://github.com/drained69/Countersign.git &amp;&amp; cd Countersign
+      <p>Tripwire needs <strong>Node 23.6 or newer</strong>. Node runs the TypeScript directly: there are no runtime dependencies and no build step. (<code>npm install</code> only adds the TypeScript compiler for <code>npm run typecheck</code>.)</p>
+      <div class="codeblock"><div class="cb-head"><span class="label">shell</span><button class="copy">Copy</button></div><pre>git clone https://github.com/drained69/Tripwire.git &amp;&amp; cd Tripwire
 npm start          # dashboard on http://127.0.0.1:8787
 npm run demo       # the stage demo in the terminal
 npm run replay     # six-week calibration replay
-npm test           # unit + integration tests</pre></div>
+npm test           # unit + integration tests
+npm run doctor     # read-only check of a live setup</pre></div>
       <p>With no configuration, every sponsor tier runs an offline stand-in and is labelled <code>mock</code> on every receipt. To go live, copy the example env file and fill in what you have:</p>
       <div class="codeblock"><div class="cb-head"><span class="label">shell</span><button class="copy">Copy</button></div><pre>cp .env.example .env</pre></div>
       <p>See <a href="#configuration">Configuration</a> for every variable.</p>
+    </section>
+
+    <section id="live">
+      <span class="eyebrow">Get started</span>
+      <h2>Going live with real payments</h2>
+      <p>The demo needs nothing. Real payments need a few steps only you can do, and Tripwire <strong>refuses to start</strong> in live mode until the safety settings are in place.</p>
+      <h3>1. Install Kite's CLIs and sign in</h3>
+      <p>Kite's official installer (kpass 6.8.9 or later), then sign in:</p>
+      <div class="codeblock"><div class="cb-head"><span class="label">shell</span><button class="copy">Copy</button></div><pre>curl -fsSL https://cli.gokite.ai/install.sh | bash
+kpass login</pre></div>
+      <p>In the Kite Passport dashboard, fund your wallet and set an <strong>account allowance</strong>. Tripwire pays from it. To pay from one separate session instead, set <code>KITE_PAY_FROM=session</code> and <code>KITE_SESSION_ID</code>.</p>
+      <h3>2. Write your policy</h3>
+      <p>Copy <code>policy.example.json</code> to <code>policy.json</code> and list the services your agents pay. Keep Tripwire's allowance at or below Kite's, which Kite enforces too.</p>
+      <h3>3. Set secrets</h3>
+      <p>Generate the owner token and one key per agent with <code>openssl rand -hex 24</code>, then in <code>.env</code>:</p>
+      <div class="codeblock"><div class="cb-head"><span class="label">.env</span><button class="copy">Copy</button></div><pre>KITE_MODE=kpass
+POLICY_FILE=policy.json
+TRIPWIRE_OWNER_TOKEN=&lt;64 hex chars&gt;            # dashboard sign-in
+TRIPWIRE_AGENT_KEYS=ops-agent:&lt;key&gt;,research-agent:&lt;key&gt;
+SERV_API_KEY=&lt;key&gt;                                 # without it, tier 1 hands payments to you
+REPPO_CREDIT_TOKEN=x402ck_…                        # without it, tier 2 hands payments to you
+NOTIFY_WEBHOOK_URL=https://hooks.slack.com/…       # optional: step-up alerts
+PUBLIC_URL=https://tripwire.yourdomain.com      # optional: links in alerts</pre></div>
+      <h3>4. Check, start, test with $0.01</h3>
+      <div class="codeblock"><div class="cb-head"><span class="label">shell</span><button class="copy">Copy</button></div><pre>npm run doctor     # read-only: never pays
+npm start</pre></div>
+      <p>Send one $0.01 payment from an agent before trusting it with more. To reach the dashboard from other machines, set <code>HOST=0.0.0.0</code> behind HTTPS (Caddy, nginx or a tunnel).</p>
+      <div class="callout"><b>Give agents Tripwire, not Kite.</b> Tripwire only protects payments that go through it. Run kpass under the account Tripwire uses and give agents only their Tripwire key, never a Kite login or session.</div>
+      <h3>What protects the money</h3>
+      <table class="doc-table">
+        <thead><tr><th>Risk</th><th>What Tripwire does</th></tr></thead>
+        <tbody>
+          <tr><td>Agent claims $1 for a $50 call</td><td>The same request is sent unpaid first and the merchant's x402 price is read. A higher price is blocked. An unreadable price goes to your passkey, through a session Kite caps at the requested amount.</td></tr>
+          <tr><td>URL points away from the payee</td><td>The URL's host must be the payee's domain or a subdomain, or the payment is blocked.</td></tr>
+          <tr><td>Price check aimed at internal machines</td><td>Public https addresses only, checked at connect time; no redirects; size and time limits.</td></tr>
+          <tr><td>Crash or network blip mid-payment</td><td>An idempotency key is saved to disk before money moves. Kite never charges twice for one key.</td></tr>
+          <tr><td>Kite can't confirm the outcome</td><td>Shown as <b>Check payment</b> and still counted. <b>Ask Kite again</b> re-sends with the same key or fetches a held payment's result; or mark it paid / not paid after checking Kite's Activity page.</td></tr>
+          <tr><td>Agent retries a purchase</td><td>Send a <code>requestKey</code>; the same agent and key get the first decision back.</td></tr>
+          <tr><td>SERV or Reppo not set up</td><td>Live mode never uses a stand-in: the payment comes to you.</td></tr>
+          <tr><td>Someone else reaches the dashboard</td><td>Owner sign-in, per-agent keys, same-site cookies, cross-site writes refused, strict CSP, rate-limited sign-in.</td></tr>
+        </tbody>
+      </table>
     </section>
 
     <section id="demo">
@@ -144,7 +188,7 @@ npm test           # unit + integration tests</pre></div>
     <section id="tier-1">
       <span class="eyebrow">How it works</span>
       <h2>Tier 1 · SERV reasoning</h2>
-      <p>SERV answers one question: <strong>does this purchase follow from the task the agent was given?</strong> Countersign calls SERV's OpenAI-compatible endpoint with a system prompt that treats vendor text as untrusted, and a strict JSON schema:</p>
+      <p>SERV answers one question: <strong>does this purchase follow from the task the agent was given?</strong> Tripwire calls SERV's OpenAI-compatible endpoint with a system prompt that treats vendor text as untrusted, and a strict JSON schema:</p>
       <div class="codeblock"><div class="cb-head"><span class="label">response schema</span><button class="copy">Copy</button></div><pre>{
   "verdict": "pass" | "escalate" | "block",
   "task_match": 0..1,
@@ -166,7 +210,7 @@ npm test           # unit + integration tests</pre></div>
       "max_iterations": { "type": "integer", "default": 2 } } } } }
 ]</pre></div>
       <ul>
-        <li><strong>PromptGuard</strong> stops input that tries to override the checker's instructions. It answers with a refusal before the model runs, so it costs nothing. Countersign records it as <code>promptGuard: triggered</code> and escalates.</li>
+        <li><strong>PromptGuard</strong> stops input that tries to override the checker's instructions. It answers with a refusal before the model runs, so it costs nothing. Tripwire records it as <code>promptGuard: triggered</code> and escalates.</li>
         <li><strong>Shadow Agent</strong> checks the verdict against the hint and makes the model revise it, up to 2 times.</li>
         <li>In our tests PromptGuard fired on about a third of identical injection attempts. It is an extra layer: when it doesn't fire, the model itself escalated every injected invoice we tried, and tier 0 flags them too.</li>
       </ul>
@@ -175,7 +219,7 @@ npm test           # unit + integration tests</pre></div>
     <section id="tier-2">
       <span class="eyebrow">How it works</span>
       <h2>Tier 2 · Reppo verdict</h2>
-      <p>Larger or suspicious payments get an independent verdict from Reppo's lite evaluation endpoint, judged inline. Countersign sends only the payment facts (task, payee, amount, purpose, vendor text, earlier flags) against four criteria:</p>
+      <p>Larger or suspicious payments get an independent verdict from Reppo's lite evaluation endpoint, judged inline. Tripwire sends only the payment facts (task, payee, amount, purpose, vendor text, earlier flags) against four criteria:</p>
       <ol>
         <li>The purpose follows directly from the agent's stated task.</li>
         <li>The payee is plausibly the legitimate vendor (not a lookalike or unrelated party).</li>
@@ -183,7 +227,7 @@ npm test           # unit + integration tests</pre></div>
         <li>The vendor text does not try to instruct the agent or alter payment details.</li>
       </ol>
       <table class="doc-table">
-        <thead><tr><th>Reppo says</th><th>Countersign does</th></tr></thead>
+        <thead><tr><th>Reppo says</th><th>Tripwire does</th></tr></thead>
         <tbody>
           <tr><td><code>accept</code> with normal confidence</td><td>Pass: proceed to payment.</td></tr>
           <tr><td><code>accept</code> with low confidence, or route <code>review</code></td><td>Escalate to you.</td></tr>
@@ -198,12 +242,11 @@ npm test           # unit + integration tests</pre></div>
     <section id="tier-3">
       <span class="eyebrow">How it works</span>
       <h2>Tier 3 · Your passkey</h2>
-      <p>When Reppo asks for a re-evaluation, Countersign opens a <strong>one-shot Kite session scoped to exactly this payment</strong>:</p>
-      <div class="codeblock"><div class="cb-head"><span class="label">kpass</span><button class="copy">Copy</button></div><pre>kpass agent:session create \
-  --task-summary "Countersign step-up: $60.00 to Acme Design for …" \
-  --max-amount-per-tx 60.00 --max-total-amount 60.00 \
-  --ttl 15m --assets USDC --payment-approach x402_http</pre></div>
-      <p>You approve or decline it with your passkey in Kite Passport. Countersign waits with <code>agent:session status --wait</code> for up to 15 minutes; no answer counts as declined. An approved payment is then executed <strong>through that one-shot session</strong> (<code>agent:session use</code>, then <code>execute</code>), so the approval can only ever pay this amount, once. In mock mode, the dashboard's Approve and Decline buttons stand in for the passkey prompt.</p>
+      <p>When a payment needs you, Tripwire opens a <strong>Kite session capped at exactly this payment</strong>:</p>
+      <div class="codeblock"><div class="cb-head"><span class="label">kpass</span><button class="copy">Copy</button></div><pre>kpass session create --separate --no-reuse --no-browser --output json \
+  --delegation '{"task":{"summary":"Tripwire step-up: one payment of $60.00 to Acme Design for …"},
+                 "payment_policy":{"max_amount_per_tx":"60.00","max_total_amount":"60.00","ttl_seconds":900}}' </pre></div>
+      <p>Kite returns an approval link. Tripwire shows it on the dashboard and sends it to <code>NOTIFY_WEBHOOK_URL</code>. You approve or decline with your passkey; Tripwire waits with <code>kpass session status --request-id … --wait</code> for up to 15 minutes, and a decline, an expired link or no answer counts as declined. The payment then runs with <code>kpass session execute --session-id &lt;that session&gt;</code>, so the approval can pay this amount, once. In mock mode, the dashboard's Approve and Decline buttons stand in for the passkey prompt.</p>
     </section>
 
     <section id="routing">
@@ -222,7 +265,7 @@ if any serious tier-0 flag            -> tier = 2</pre></div>
     <section id="calibration">
       <span class="eyebrow">How it works</span>
       <h2>Calibration</h2>
-      <p>Countersign learns per payee. Reppo accepts and your approvals count as <strong>clean signals</strong>; Reppo rejects and your declines count as <strong>incidents</strong>. They move a multiplier applied to that payee's tier-1 and tier-2 thresholds:</p>
+      <p>Tripwire learns per payee. Reppo accepts and your approvals count as <strong>clean signals</strong>; Reppo rejects and your declines count as <strong>incidents</strong>. They move a multiplier applied to that payee's tier-1 and tier-2 thresholds:</p>
       <table class="doc-table">
         <thead><tr><th>History</th><th>Multiplier</th><th>Effect</th></tr></thead>
         <tbody>
@@ -280,13 +323,15 @@ The ops agent can spend at most $70 per payment. Block payments to fastcash.exam
       <span class="eyebrow">Reference</span>
       <h2>API</h2>
       <p>The server binds to <code>127.0.0.1:8787</code> by default. All bodies are JSON, limited to 64 KB.</p>
+      <div class="callout"><b>Authentication.</b> With <code>TRIPWIRE_OWNER_TOKEN</code> set, every API call except sign-in needs a caller. Agents send <code>Authorization: Bearer &lt;agent key&gt;</code> and may only submit payments and read their own receipts and limits. You sign in on the dashboard (HttpOnly, SameSite=Strict cookie) or send the owner token as a Bearer token. The local demo has no token, so everyone is the owner.</div>
 
       <div class="endpoint"><span class="method post">POST</span><code>/api/intents</code></div>
       <p>Submit a payment intent. Responds immediately with <code>202</code>; the decision streams over <code>/api/events</code>.</p>
       <div class="codeblock"><div class="cb-head"><span class="label">curl</span><button class="copy">Copy</button></div><pre>curl -X POST http://127.0.0.1:8787/api/intents \
   -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer $AGENT_KEY" \
   -d '{
-    "agentId": "ops-agent",
+    "requestKey": "invoice-1042",
     "agentTask": "Pay approved vendor invoices for the Acme Design brand refresh project",
     "payee": "acme-billing.example",
     "payeeName": "Acme Design (billing)",
@@ -297,10 +342,17 @@ The ops agent can spend at most $70 per payment. Block payments to fastcash.exam
     "method": "POST"
   }'
 
-# 202 { "id": "pi_…", "receipt": "/api/receipts/pi_…" }</pre></div>
+# 202 { "id": "pi_…", "receipt": "/api/receipts/pi_…" }
+# the same requestKey again: 200 { "id": "pi_…", "duplicate": true, "status": "approved" }</pre></div>
 
       <div class="endpoint"><span class="method get">GET</span><code>/api/receipts/:id</code></div>
-      <p>The full receipt. <code>404</code> if unknown.</p>
+      <p>The full receipt. <code>404</code> if unknown, or if it belongs to another agent.</p>
+
+      <div class="endpoint"><span class="method get">GET</span><code>/api/agent/policy</code></div>
+      <p>The calling agent's limits: allowance spent and left, per-payment cap, thresholds, known and blocked payees, and its own rules.</p>
+
+      <div class="endpoint"><span class="method post">POST</span><code>/api/receipts/:id/recheck</code> <span class="method post">POST</span><code>/api/receipts/:id/resolve</code></div>
+      <p>Owner only, for a <code>payment_unknown</code> receipt. <code>recheck</code> asks Kite again with the same idempotency key (it never pays twice) or fetches a held payment's result. <code>resolve</code> takes <code>{"answer":"paid"|"not_paid"}</code> after you've checked Kite's Activity page.</p>
 
       <div class="endpoint"><span class="method get">GET</span><code>/api/events</code></div>
       <p>Server-sent events. Sends <code>{"type":"receipt","receipt":{…}}</code> on every receipt change and <code>{"type":"reset"}</code> when the demo resets.</p>
@@ -321,31 +373,35 @@ The ops agent can spend at most $70 per payment. Block payments to fastcash.exam
       <p>Body <code>{"id":"…"}</code> from a compile. Applies that exact preview, saves it, and re-runs the replay against it.</p>
 
       <div class="endpoint"><span class="method post">POST</span><code>/api/demo/next</code> <span class="method post">POST</span><code>/api/demo/reset</code></div>
-      <p>Play the next scripted payment (<code>409</code> when the script is done), or clear receipts, calibration and applied rules.</p>
+      <p>Play the next scripted payment (<code>409</code> when the script is done), or clear receipts, calibration and applied rules. Both are off in live mode.</p>
+
+      <div class="endpoint"><span class="method post">POST</span><code>/api/login</code> <span class="method post">POST</span><code>/api/logout</code> <span class="method get">GET</span><code>/api/session</code> <span class="method get">GET</span><code>/api/health</code></div>
+      <p>Sign in with <code>{"token":"…"}</code> (10 failures per 10 minutes per address, then <code>429</code>), sign out, see who you are, check the server is up.</p>
     </section>
 
     <section id="mcp">
       <span class="eyebrow">Reference</span>
       <h2>Connect an agent (MCP)</h2>
-      <p>Countersign ships as an MCP server (stdio, no dependencies). An agent adds it once and pays through it instead of calling Kite directly. It forwards to a running Countersign server.</p>
-      <div class="codeblock"><div class="cb-head"><span class="label">Claude Code</span><button class="copy">Copy</button></div><pre>claude mcp add countersign \
-  --env COUNTERSIGN_URL=http://127.0.0.1:8787 \
-  -- node /path/to/countersign/src/mcp.ts</pre></div>
+      <p>Tripwire ships as an MCP server (stdio, no dependencies). An agent adds it once and pays through it instead of calling Kite directly. It forwards to a running Tripwire server.</p>
+      <div class="codeblock"><div class="cb-head"><span class="label">Claude Code</span><button class="copy">Copy</button></div><pre>claude mcp add tripwire \
+  --env TRIPWIRE_URL=http://127.0.0.1:8787 \
+  --env TRIPWIRE_AGENT_KEY=&lt;this agent's key&gt; \
+  -- node /path/to/tripwire/src/mcp.ts</pre></div>
       <div class="codeblock"><div class="cb-head"><span class="label">any MCP client · mcp.json</span><button class="copy">Copy</button></div><pre>{
   "mcpServers": {
-    "countersign": {
+    "tripwire": {
       "command": "node",
-      "args": ["/path/to/countersign/src/mcp.ts"],
-      "env": { "COUNTERSIGN_URL": "http://127.0.0.1:8787" }
+      "args": ["/path/to/tripwire/src/mcp.ts"],
+      "env": { "TRIPWIRE_URL": "http://127.0.0.1:8787", "TRIPWIRE_AGENT_KEY": "&lt;this agent's key&gt;" }
     }
   }
 }</pre></div>
       <table class="doc-table">
         <thead><tr><th>Tool</th><th>What it does</th></tr></thead>
         <tbody>
-          <tr><td><code>countersign_pay</code></td><td>Takes the intent fields plus optional <code>waitSeconds</code> (default 120, max 900). Returns <code>APPROVED</code>, <code>BLOCKED</code> or <code>PENDING_*</code> with every check and a receipt link. A blocked result tells the agent not to retry or pay by other means.</td></tr>
-          <tr><td><code>countersign_receipt</code></td><td>Look up a decision by id, e.g. one still waiting for your passkey.</td></tr>
-          <tr><td><code>countersign_policy</code></td><td>Allowance left, caps, thresholds, known and blocked payees, and agent rules.</td></tr>
+          <tr><td><code>tripwire_pay</code></td><td>Takes the intent fields plus optional <code>requestKey</code> and <code>waitSeconds</code> (default 120, max 900). Returns <code>APPROVED</code>, <code>BLOCKED</code>, <code>PENDING_*</code>, <code>PAYING</code> or <code>PAYMENT_UNKNOWN</code> with every check and a receipt link. Blocked and unknown results tell the agent not to retry or pay by other means.</td></tr>
+          <tr><td><code>tripwire_receipt</code></td><td>Look up a decision by id, e.g. one still waiting for your passkey.</td></tr>
+          <tr><td><code>tripwire_policy</code></td><td>This agent's limits: allowance left, caps, thresholds, known and blocked payees, and its own rules.</td></tr>
         </tbody>
       </table>
       <p>Results come back as text for the model and as <code>structuredContent</code> with the full receipt. Errors come back as tool results with <code>isError: true</code>, so the agent sees why and stops.</p>
@@ -357,15 +413,16 @@ The ops agent can spend at most $70 per payment. Block payments to fastcash.exam
       <table class="doc-table">
         <thead><tr><th>Field</th><th>Type</th><th>Notes</th></tr></thead>
         <tbody>
-          <tr><td><code>agentId</code></td><td>string ≤ 100</td><td>Required. Which agent is paying.</td></tr>
+          <tr><td><code>agentId</code></td><td>string ≤ 100</td><td>Required, unless an agent key sets it. Which agent is paying.</td></tr>
           <tr><td><code>agentTask</code></td><td>string ≤ 500</td><td>Required. The task the agent was given (its Kite session summary).</td></tr>
           <tr><td><code>payee</code></td><td>string ≤ 200</td><td>Required. Domain or wallet address.</td></tr>
           <tr><td><code>payeeName</code></td><td>string ≤ 200</td><td>Required. Human-readable vendor name.</td></tr>
           <tr><td><code>amountUsd</code></td><td>number &gt; 0</td><td>Required.</td></tr>
           <tr><td><code>category</code></td><td>string ≤ 100</td><td>Required. E.g. “transcription”.</td></tr>
           <tr><td><code>purpose</code></td><td>string ≤ 500</td><td>Required. What this specific purchase is for.</td></tr>
-          <tr><td><code>url</code></td><td>https string ≤ 2000</td><td>Optional. x402 endpoint Kite calls once approved.</td></tr>
-          <tr><td><code>method</code></td><td>string ≤ 10</td><td>Optional. Defaults to GET.</td></tr>
+          <tr><td><code>url</code></td><td>https string ≤ 2000</td><td>Required in live mode. x402 endpoint Kite pays once approved; must be on the payee's domain.</td></tr>
+          <tr><td><code>method</code></td><td>GET · POST · PUT · PATCH · DELETE</td><td>Optional. Defaults to GET.</td></tr>
+          <tr><td><code>requestKey</code></td><td>string ≤ 200</td><td>Optional. Your id for this purchase; resubmitting it returns the first decision instead of paying twice.</td></tr>
           <tr><td><code>headers</code></td><td>object of strings</td><td>Optional. Extra headers for the x402 call (≤ 2,000 chars).</td></tr>
           <tr><td><code>body</code></td><td>any JSON</td><td>Optional. Request body for the x402 call, e.g. an invoice POST (≤ 8,000 chars).</td></tr>
           <tr><td><code>vendorText</code></td><td>string ≤ 8000</td><td>Optional. Invoice or quote text. Screened, never obeyed.</td></tr>
@@ -378,13 +435,21 @@ The ops agent can spend at most $70 per payment. Block payments to fastcash.exam
       <h2>Receipt schema</h2>
       <div class="codeblock"><div class="cb-head"><span class="label">typescript</span><button class="copy">Copy</button></div><pre>interface Receipt {
   intent: PaymentIntent;
-  status: "approved" | "blocked" | "pending_network" | "pending_human";
+  status: "approved" | "blocked" | "pending_network" | "pending_human"
+        | "paying"            // approved, Kite payment in progress
+        | "payment_unknown";  // Kite couldn't confirm it: counted until rechecked or resolved
   steps: StepRecord[];
   verificationCostUsd: number;
   plannedTier: 0 | 1 | 2 | 3;
   payment?: {
-    executed: boolean; mode: "live" | "mock";
-    ref?: string; txHash?: string;
+    executed: boolean;                    // true only when known to be paid
+    state: "paid" | "not_paid" | "unknown" | "held";
+    mode: "live" | "mock";
+    idempotencyKey?: string;              // saved before paying; any retry reuses it
+    amountUsd?: number;                   // what Kite reports it paid
+    merchantStatus?: number;              // merchant's HTTP status after payment
+    paymentId?: string; ref?: string; txHash?: string;
+    errorCode?: string; userMessage?: string;  // Kite's own code and message
     explorerUrl?: string;   // only a link Kite itself returned
     sessionId?: string;     // the one-shot step-up session it paid through
     error?: string;
@@ -401,14 +466,14 @@ interface StepRecord {
   costUsd: number;
   latencyMs: number;
   mode: "live" | "mock" | "sandbox";
-  detail?: Record&lt;string, unknown&gt;;   // e.g. promptGuard, servTools, kiteDirectory, splitTotalUsd, evalId
+  detail?: Record&lt;string, unknown&gt;;   // e.g. promptGuard, servTools, kiteDirectory, priceQuote, approvalUrl, evalId
 }</pre></div>
     </section>
 
     <section id="configuration">
       <span class="eyebrow">Reference</span>
       <h2>Configuration</h2>
-      <p>Put these in <code>countersign/.env</code> (it is git-ignored). Real environment variables take precedence over the file.</p>
+      <p>Put these in <code>tripwire/.env</code> (it is git-ignored). Real environment variables take precedence over the file.</p>
       <table class="doc-table">
         <thead><tr><th>Variable</th><th>Default</th><th>Purpose</th></tr></thead>
         <tbody>
@@ -419,13 +484,20 @@ interface StepRecord {
           <tr><td><code>REPPO_CREDIT_TOKEN</code></td><td>—</td><td>Credit token (<code>x402ck_…</code>) for paid lite evaluations.</td></tr>
           <tr><td><code>REPPO_SANDBOX</code></td><td><code>false</code></td><td>Free placeholder verdicts from the real API. Always “revise”.</td></tr>
           <tr><td><code>REPPO_BASE_URL</code></td><td><code>https://eval.reppo.xyz</code></td><td>Reppo endpoint.</td></tr>
-          <tr><td><code>KITE_MODE</code></td><td><code>mock</code></td><td><code>kpass</code> for real payments and passkey step-ups.</td></tr>
+          <tr><td><code>KITE_MODE</code></td><td><code>mock</code></td><td><code>kpass</code> for real payments and passkey step-ups. Needs kpass 6.8.9+, signed in. See <a href="#live">Going live</a>.</td></tr>
+          <tr><td><code>KITE_PAY_FROM</code> / <code>KITE_SESSION_ID</code></td><td><code>allowance</code> / —</td><td>Pay from the Kite account allowance, or from one named session.</td></tr>
+          <tr><td><code>TRIPWIRE_OWNER_TOKEN</code></td><td>—</td><td>Dashboard sign-in (24+ characters). Required in live mode or when <code>HOST</code> isn't loopback.</td></tr>
+          <tr><td><code>TRIPWIRE_AGENT_KEYS</code></td><td>—</td><td><code>agentId:key,agentId:key</code> (24+ characters each). Required in live mode.</td></tr>
+          <tr><td><code>POLICY_FILE</code></td><td>—</td><td>Your starting policy. Required for the first live start; rules applied on the dashboard are saved and win afterwards.</td></tr>
+          <tr><td><code>NOTIFY_WEBHOOK_URL</code></td><td>—</td><td>Gets <code>{ text, receiptUrl, approvalUrl, … }</code> when a payment needs you (Slack-compatible).</td></tr>
+          <tr><td><code>PUBLIC_URL</code></td><td><code>http://HOST:PORT</code></td><td>Base URL for links in notifications.</td></tr>
+          <tr><td><code>COOKIE_SECURE</code></td><td>auto</td><td>Force the <code>Secure</code> cookie flag (on automatically for https).</td></tr>
           <tr><td><code>PORT</code> / <code>HOST</code></td><td>8787 / 127.0.0.1</td><td>Where the server listens.</td></tr>
-          <tr><td><code>STATE_FILE</code></td><td><code>data/state.json</code></td><td>Where receipts, calibration and applied rules are saved.</td></tr>
-          <tr><td><code>COUNTERSIGN_URL</code></td><td><code>http://127.0.0.1:8787</code></td><td>For the MCP server: which Countersign server to forward to.</td></tr>
+          <tr><td><code>STATE_FILE</code></td><td><code>data/state.json</code> (live: <code>data/live-state.json</code>)</td><td>Receipts, calibration and applied rules. Written atomically, mode 600.</td></tr>
+          <tr><td><code>TRIPWIRE_URL</code> / <code>TRIPWIRE_AGENT_KEY</code></td><td><code>http://127.0.0.1:8787</code> / —</td><td>For the MCP server: which Tripwire server to forward to, and as which agent.</td></tr>
         </tbody>
       </table>
-      <p>The demo policy ($100 allowance, $75 cap, $1 and $20 thresholds, a 60-minute duplicate window, four known payees and one deny-listed payee) lives in <code>src/config.ts</code>.</p>
+      <p>The demo policy ($100 allowance, $75 cap, $1 and $20 thresholds, a 60-minute duplicate window, four known payees and one deny-listed payee) lives in <code>src/config.ts</code>. A policy can also set <code>resetPeriod</code> (<code>never</code>, <code>weekly</code> or <code>monthly</code>, UTC) so the allowance starts over like Kite's.</p>
     </section>
 
     <section id="integrations">
@@ -436,14 +508,15 @@ interface StepRecord {
       <h3>Reppo</h3>
       <p><code>POST /api/v1/x402/evals/lite</code> with <code>{ type: "plan", payload, criteria, context }</code>, authenticated by a credit token or the <code>Sandbox: true</code> header. <strong>Verified live in sandbox</strong>, including the response shape <code>result.verdict</code>, <code>verdicts[]</code> and <code>action.route</code>. Each evaluation takes about 4 seconds.</p>
       <h3>Kite Agent Passport</h3>
-      <p>Kite has no public HTTP API; agents use the <code>kpass</code> and <code>ksearch</code> CLIs, always with <code>--output json</code> and never through a shell.</p>
+      <p>Kite has no public HTTP API; agents use the <code>kpass</code> and <code>ksearch</code> CLIs, always with <code>--output json</code> and never through a shell. Tripwire follows the command reference in Kite's official <a href="https://github.com/gokite-ai/passport-skills">passport-skills</a> (kpass 6.8.9+).</p>
       <ul>
-        <li><strong>Payments:</strong> <code>agent:session execute --url --method [--headers] [--body]</code>.</li>
-        <li><strong>Step-up:</strong> <code>agent:session create</code> scoped to one payment, <code>status --wait</code> for your passkey answer, then <code>agent:session use</code> so the payment goes through that session.</li>
-        <li><strong>Directory check:</strong> <code>ksearch services list --query &lt;payee name&gt; --payment-approach x402_http --asset USDC</code>, matched on the payee's domain.</li>
-        <li><strong>Receipts</strong> show the payment reference, transaction hash and explorer link only when Kite returns them; Countersign never builds explorer URLs.</li>
+        <li><strong>Payments:</strong> <code>session execute --url --method --idempotency-key [--headers] [--body]</code> with <code>--use-allowance</code>, or <code>--session-id</code> for a step-up session.</li>
+        <li><strong>Step-up:</strong> <code>session create --separate</code> with a delegation capped at one payment, then <code>session status --request-id --wait</code> for your passkey answer.</li>
+        <li><strong>Outcomes:</strong> success; exit 6 (allowance, balance or caps: nothing paid); exit 7 pending or held (counted, rechecked with the same key, or with <code>session updates</code> for held payments); exit 1 bridge or swap failures (treated as possibly paid). A timeout or unreadable reply is never treated as unpaid.</li>
+        <li><strong>Directory check:</strong> <code>ksearch service search &lt;payee name&gt;</code>, matched on the payee's domain.</li>
+        <li><strong>Receipts</strong> show Kite's payment id, amount, the merchant's HTTP status and Kite's own message. Tripwire never builds explorer URLs.</li>
       </ul>
-      <p>This path follows Kite's documentation but has <strong>not yet been run</strong> against a real Passport. Offline, a stand-in directory lists the legitimate demo vendors.</p>
+      <p>This path is tested against a simulated kpass that answers with Kite's documented replies, including the full live server flow. It has <strong>not yet moved real money</strong>: run <code>npm run doctor</code>, then a $0.01 payment. Offline, a stand-in directory lists the legitimate demo vendors.</p>
     </section>
 
     <section id="security">
@@ -457,7 +530,10 @@ interface StepRecord {
         <li><strong>No splitting around review.</strong> Payments still being checked count against the allowance, and an agent's recent payments to a payee are added up before choosing the tier.</li>
         <li><strong>Policy changes are reviewed.</strong> SERV only proposes rules; code checks them and nothing applies until you approve the exact diff.</li>
         <li><strong>No secrets in public evaluations.</strong> Reppo payloads contain only payment facts.</li>
-        <li><strong>Local by default, no built-in auth.</strong> The server listens on loopback, validates every intent and limits request bodies. The API has no authentication: put it behind an authenticating proxy before exposing it beyond your machine. Receipts that were pending when the server stopped are recorded as blocked when it restarts.</li>
+        <li><strong>Price and payee checked before paying.</strong> In live mode the merchant's own x402 price must not exceed the requested amount, and the URL must be on the payee's domain.</li>
+        <li><strong>Never pays twice.</strong> Idempotency keys are saved before money moves; unconfirmed outcomes stay counted and are only rechecked with the same key.</li>
+        <li><strong>Signed-in owner, keyed agents.</strong> Owner sign-in, a key per agent, HttpOnly SameSite=Strict cookies, cross-site writes refused, a strict Content-Security-Policy and rate-limited sign-in. Live mode, or a non-loopback <code>HOST</code>, won't start without an owner token, and the open demo only answers requests addressed to localhost, so a website can't reach it through DNS rebinding.</li>
+        <li><strong>Durable, separate state.</strong> Atomic writes (mode 600). Live mode has its own state file and refuses to start on an unreadable one. A payment interrupted mid-flight is marked unconfirmed, never forgotten.</li>
       </ul>
     </section>
 
@@ -473,10 +549,12 @@ interface StepRecord {
       <span class="eyebrow">More</span>
       <h2>Limitations</h2>
       <ul>
-        <li>The Kite path is untested against a real Passport. The exact step-up status values and payment reference format still need confirming.</li>
+        <li>The Kite path follows Kite's published reference and is tested against a simulator, but hasn't moved real money yet. Do a $0.01 payment first.</li>
+        <li>Merchant prices are read from the standard x402 <code>accepts</code> list and common price fields; a merchant that hides its price gets your passkey step-up, never a blind payment.</li>
         <li>SERV adds 6–18 seconds per check, which is noticeable for small, frequent payments.</li>
         <li>Reppo's sandbox always answers “revise”, so under sandbox every tier-2 payment goes to a human.</li>
-        <li>State is a single JSON file, and the policy is a single demo allowance. Neither is built for multiple tenants.</li>
+        <li>One owner per deployment: each server protects one Kite account and one policy, with state in a JSON file.</li>
+        <li>Tripwire can't stop an agent that also holds its own Kite login. Give agents only their Tripwire key.</li>
         <li>Lookalike and injection detection are heuristics. They are a first filter; SERV and Reppo are the backstop.</li>
         <li>SERV PromptGuard fires inconsistently (about a third of identical attempts in our tests), and SERV's Shadow Agent reports no result in the response, so neither can be counted on alone.</li>
         <li>The Kite directory match is by the payee's domain appearing in a listed service's data; a vendor listed under a different domain looks unlisted.</li>
@@ -493,31 +571,29 @@ interface StepRecord {
       <p>Vendor text is screened at three tiers and never treated as instructions. Phrases like “approve immediately” or “change the payee wallet” escalate the payment; they cannot approve it.</p>
       <h3>What if SERV or Reppo is down?</h3>
       <p>The payment escalates to the next tier and ultimately to you. An outage never approves a payment.</p>
+      <h3>Can a payment go out twice?</h3>
+      <p>Every payment carries an idempotency key that is saved before Kite is called, and Kite never charges twice for the same key. If Kite can't confirm an outcome, the payment stays counted and is only ever rechecked with that same key.</p>
       <h3>Does calibration ever let a bad payment through?</h3>
       <p>Calibration only raises the amount thresholds for payees with a clean history. Lookalikes, duplicates, injected text, unusual amounts and allowance pressure ignore it. In the replay, all 30 bad payments were caught with calibration on.</p>
     </section>
   </article>
 </div>
 
-<footer class="footer" style="border-top:1px solid var(--line)">
-  <div class="container">
-    <div><a class="wordmark" href="/">Countersign</a><p>A tiered co-signer for Kite agent allowances. Built for the OpenServ SERV Hackathon, Kite track.</p></div>
-    <nav aria-label="Footer"><a href="/">Dashboard</a><a href="#api">API</a><a href="#configuration">Configuration</a></nav>
+<footer class="footer">
+  <div class="footer-card">
+    <div class="footer-grid">
+      <div class="footer-brand">
+        <a class="brand" href="/"><svg class="mark" viewBox="0 0 28 28" aria-hidden="true"><rect width="28" height="28" rx="7"/><path d="M4.5 17.5h5.5l2.6-7 3.2 10 2.6-6.5h5.1"/></svg><span class="wordmark">Tripwire</span></a>
+        <p>A tripwire between your agents' Kite allowance and every payment: code rules, SERV reasoning, a Reppo verdict and your passkey, with a receipt for every decision.</p>
+      </div>
+      <nav aria-label="Product"><span class="label">Product</span><a href="/">Dashboard</a><a href="/#policy-editor">Plain-English policy</a><a href="/#replay">Replay</a><a href="/#connect">Connect an agent</a></nav>
+      <nav aria-label="Docs"><span class="label">Docs</span><a href="/docs#quickstart">Quickstart</a><a href="/docs#live">Going live</a><a href="/docs#api">API reference</a><a href="/docs#security">Security model</a></nav>
+      <nav aria-label="Built on"><span class="label">Built on</span><a href="https://openserv.ai" rel="noopener">OpenServ SERV ↗</a><a href="https://reppo.xyz" rel="noopener">Reppo ↗</a><a href="https://gokite.ai" rel="noopener">Kite Agent Passport ↗</a></nav>
+    </div>
+    <div class="footer-base"><span>© 2026 Tripwire</span><span>Agents spend · bad payments trip the wire</span></div>
   </div>
 </footer>
 
-<script>
-  // Highlight the section currently in view.
-  const links = [...document.querySelectorAll("#docsNav a")];
-  const byId = new Map(links.map((a) => [a.getAttribute("href").slice(1), a]));
-  const io = new IntersectionObserver((entries) => {
-    for (const e of entries) {
-      if (!e.isIntersecting) continue;
-      links.forEach((a) => a.classList.remove("active"));
-      byId.get(e.target.id)?.classList.add("active");
-    }
-  }, { rootMargin: "-90px 0px -70% 0px" });
-  document.querySelectorAll(".prose section[id]").forEach((s) => io.observe(s));
-</script>
+<script src="/docs.js"></script>
 </body>
 </html>

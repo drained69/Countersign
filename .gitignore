@@ -1,6 +1,10 @@
 node_modules/
 data/*.json
+data/*.tmp
 .env
 .env.*
 !.env.example
+policy.json
 .DS_Store
+*.log
+coverage/

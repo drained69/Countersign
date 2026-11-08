@@ -1,6 +1,7 @@
 // Tier 0: deterministic rules. No model calls, ~zero cost, always runs.
 import type { PaymentIntent, Policy, StepRecord } from "../types.ts";
 import type { DirectoryResult } from "../adapters/kite.ts";
+import type { PriceQuote } from "../adapters/x402.ts";
 
 export interface Tier0Context {
   policy: Policy;
@@ -12,7 +13,12 @@ export interface Tier0Context {
   inFlight?: PaymentIntent[];
   /** Kite service-directory lookup for the payee, if one ran. */
   directory?: DirectoryResult;
+  /** The merchant's own price for this request, read from its x402 challenge (live payments only). */
+  quote?: PriceQuote;
 }
+
+/** Reason prefix that forces the owner's passkey even when every network check passes. */
+export const PRICE_UNVERIFIED = "Couldn't confirm the merchant's price";
 
 /** Classic edit distance, used to catch lookalike payees (acme-billing.io vs acme-bi11ing.io). */
 export function levenshtein(a: string, b: string): number {
@@ -161,10 +167,36 @@ export function runTier0(intent: PaymentIntent, ctx: Tier0Context): StepRecord {
   if (!isKnown && !imitated) escalate.push("Payee has not been paid before.");
   // A new payee that Kite's own service directory doesn't list gets network review.
   const dir = ctx.directory;
+  const q = ctx.quote;
   if (!isKnown && dir?.listed === false) escalate.push(`Payee is not listed in Kite's service directory.`);
   const note: string[] = [];
   if (dir?.listed) note.push(`Listed in Kite's service directory${dir.name ? ` as ${dir.name}` : ""}.`);
   if (dir?.error) note.push("Kite directory lookup failed; payee treated as unverified.");
+  if (q?.priceUsd !== undefined && q.priceUsd <= intent.amountUsd + 1e-6) note.push(`Merchant's price confirmed: $${q.priceUsd.toFixed(4)}.`);
+
+  // The money goes to whatever the URL charges, so the URL must belong to the payee being checked.
+  if (intent.url) {
+    let urlHost = "";
+    try {
+      urlHost = new URL(intent.url).hostname.toLowerCase();
+    } catch {}
+    const payeeHost = intent.payee.toLowerCase().replace(/^https?:\/\//, "").split("/")[0];
+    const isDomain = /^[a-z0-9.-]+\.[a-z]{2,}$/.test(payeeHost) && !/^0x[0-9a-f]{40}$/.test(payeeHost);
+    if (isDomain && urlHost !== payeeHost && !urlHost.endsWith(`.${payeeHost}`)) {
+      block.push(`Payment URL goes to ${urlHost || "an invalid host"}, not to the payee ${payeeHost}.`);
+    }
+  }
+
+  // Live payments: what the merchant actually charges, from its own payment challenge.
+  if (q?.priceUsd !== undefined) {
+    if (q.priceUsd > intent.amountUsd + 1e-6) {
+      block.push(`Merchant charges $${q.priceUsd.toFixed(4)}, more than the $${intent.amountUsd.toFixed(2)} the agent asked to pay.`);
+    }
+  } else if (q && q.status !== undefined && q.status !== 402 && !q.error) {
+    // No payment challenge: Kite would find nothing to pay and charge nothing.
+  } else if (q) {
+    escalate.push(`${PRICE_UNVERIFIED}${q.error ? ` (${q.error})` : ""}; your passkey caps this payment at the requested amount.`);
+  }
 
   const outcome = block.length ? "block" : escalate.length ? "escalate" : "pass";
   return {
@@ -176,6 +208,6 @@ export function runTier0(intent: PaymentIntent, ctx: Tier0Context): StepRecord {
     costUsd: 0,
     latencyMs: Date.now() - started,
     mode: "live",
-    detail: { lookalikeOf: imitated, injections, newPayee: !isKnown, remainingUsd: remaining, splitTotalUsd: parts.length ? splitTotal : undefined, kiteDirectory: dir },
+    detail: { lookalikeOf: imitated, injections, newPayee: !isKnown, remainingUsd: remaining, splitTotalUsd: parts.length ? splitTotal : undefined, kiteDirectory: dir, priceQuote: q },
   };
 }

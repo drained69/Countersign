@@ -3,18 +3,19 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Countersign</title>
+  <title>Tripwire</title>
   <meta name="description" content="A tiered co-signer for AI agent payments on Kite: code rules, SERV reasoning, Reppo verdicts and a passkey step-up." />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600&family=IBM+Plex+Mono:wght@400;500;600&family=Space+Grotesk:wght@300;400;500&display=swap" />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap" />
+  <link rel="icon" href="/mark.svg" type="image/svg+xml" />
   <link rel="stylesheet" href="/styles.css" />
   <script src="/shell.js"></script>
 </head>
 <body>
 <header class="nav">
   <div class="container">
-    <a class="wordmark" href="/">Countersign</a>
+    <a class="brand" href="/"><svg class="mark" viewBox="0 0 28 28" aria-hidden="true"><rect width="28" height="28" rx="7"/><path d="M4.5 17.5h5.5l2.6-7 3.2 10 2.6-6.5h5.1"/></svg><span class="wordmark">Tripwire</span></a>
     <nav class="nav-links" aria-label="Primary">
       <a href="/" aria-current="page">Dashboard</a>
       <a href="#policy-editor" class="hide-xs">Policy</a>
@@ -23,28 +24,55 @@
     </nav>
     <div class="nav-right">
       <div class="modes-mini" id="modesMini"></div>
+      <button class="btn text sm" id="logout" hidden>Sign out</button>
       <button class="theme-toggle" data-theme-toggle aria-label="Toggle dark mode"></button>
+      <a class="btn sm go nav-cta" href="#connect">Connect an agent</a>
     </div>
   </div>
 </header>
 
+<div class="login-gate" id="loginGate" hidden>
+  <form class="card login-card" id="loginForm">
+    <div class="brand"><svg class="mark" viewBox="0 0 28 28" aria-hidden="true"><rect width="28" height="28" rx="7"/><path d="M4.5 17.5h5.5l2.6-7 3.2 10 2.6-6.5h5.1"/></svg><span class="wordmark">Tripwire</span></div>
+    <h2 class="h3">Sign in to your dashboard</h2>
+    <p class="small muted">Enter the owner token from <code>TRIPWIRE_OWNER_TOKEN</code>. Agents use their own API keys and can't sign in here.</p>
+    <label class="label" for="loginToken">Owner token</label>
+    <input type="password" id="loginToken" autocomplete="current-password" required />
+    <button class="btn" type="submit">Sign in</button>
+    <p class="small login-error" id="loginError" role="alert"></p>
+  </form>
+</div>
+
 <main>
   <section class="hero">
-    <svg class="arcs" viewBox="0 0 1200 520" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
-      <path d="M-80 470 C 260 120, 760 60, 1300 260" />
-      <path d="M-60 560 C 340 260, 820 230, 1300 420" />
-      <path d="M200 -40 C 420 160, 860 200, 1260 40" />
-    </svg>
-    <div class="container">
-      <span class="eyebrow">Co-signer for agent payments</span>
-      <h1 class="display">Allowances let your agents spend without asking. Countersign makes sure they should.</h1>
-      <p class="lead">Every payment out of a shared Kite allowance climbs a ladder of checks that gets stricter as more money is at risk: code rules, SERV reasoning, a Reppo network verdict, and finally your passkey. Each decision ships with a receipt.</p>
-      <div class="hero-actions">
-        <button class="btn" id="next">Run next demo payment</button>
-        <a class="btn outline" href="/docs">Read the docs</a>
-        <button class="btn text" id="reset">Reset demo</button>
+    <div class="hero-card">
+      <div class="hero-grid">
+        <div class="hero-copy">
+          <span class="live-label"><i></i><span id="heroMode">Co-signer for Kite agent allowances</span></span>
+          <h1 class="display">Agents spend freely.<br />Bad payments trip the wire.</h1>
+          <p class="lead">Every payment out of your agents' Kite allowance passes a ladder of checks that gets stricter as more money is at risk: code rules, SERV reasoning, a Reppo verdict, and finally your passkey. Every decision has a receipt.</p>
+          <div class="hero-actions">
+            <button class="btn lime go" id="next">Run next demo payment</button>
+            <a class="btn ghost go" href="/docs">Read the docs</a>
+            <button class="btn text on-deep" id="reset">Reset demo</button>
+          </div>
+          <div class="hero-hint" id="demoHint"></div>
+        </div>
+        <div class="hero-visual" aria-hidden="true">
+          <div class="slip">
+            <div class="slip-head">TRIPWIRE · RECEIPT</div>
+            <div class="slip-amt">$60.00 <small>to acme-bi11ing.example</small></div>
+            <ul>
+              <li><i class="k code">0</i><span>Code rules<em>lookalike payee</em></span><b class="esc">escalate</b></li>
+              <li><i class="k llm">1</i><span>SERV<em>PromptGuard tripped</em></span><b class="esc">escalate</b></li>
+              <li><i class="k network">2</i><span>Reppo<em>score 38 · revise</em></span><b class="esc">escalate</b></li>
+              <li><i class="k human">3</i><span>Your passkey<em>declined</em></span><b class="blk">block</b></li>
+            </ul>
+            <div class="slip-foot">✕ Blocked · nothing paid · cost $0.22</div>
+          </div>
+        </div>
       </div>
-      <div class="hero-hint" id="demoHint"></div>
+      <div class="hero-strip"><span>Code rules · SERV · Reppo · your passkey · a receipt for every decision</span><span>Scroll ↓</span></div>
     </div>
   </section>
 
@@ -77,6 +105,15 @@
   </section>
 
   <section class="section board-section">
+    <div class="container">
+      <div class="section-head">
+        <div>
+          <span class="eyebrow"><span class="num">01</span>Live decisions</span>
+          <h2 class="h2">Every payment, decided in the open.</h2>
+        </div>
+        <p>Each one shows the rungs it climbed, why, and what the checks cost. Open a receipt for the full trail.</p>
+      </div>
+    </div>
     <div class="container board">
       <div class="card">
         <div class="card-head">
@@ -93,7 +130,7 @@
 
       <aside class="side">
         <div class="card">
-          <div class="card-head"><h3>Agents</h3><span class="label">3 on this allowance</span></div>
+          <div class="card-head"><h3>Agents</h3><span class="label" id="agentCount"></span></div>
           <ul class="list" id="agents"></ul>
         </div>
         <div class="card">
@@ -102,7 +139,7 @@
           <p class="small muted" style="margin:0;padding:12px 14px 16px;border-top:1px solid var(--line)">Clean verdicts raise a payee's thresholds (up to 4×) after two signals; any incident halves them. Serious flags ignore this.</p>
         </div>
         <div class="card">
-          <div class="card-head"><h3>Policy</h3><span class="label">Demo allowance</span></div>
+          <div class="card-head"><h3>Policy</h3><span class="label" id="policyLabel"></span></div>
           <dl class="kv" id="policy"></dl>
         </div>
       </aside>
@@ -113,7 +150,7 @@
     <div class="container">
       <div class="section-head">
         <div>
-          <span class="eyebrow">Policy in plain English</span>
+          <span class="eyebrow"><span class="num">02</span>Policy in plain English</span>
           <h2 class="h2">Write the rules the way you'd tell a person.</h2>
         </div>
         <p>SERV compiles your sentences into strict rules. Code checks every value, you review the exact changes, and nothing applies until you say so. Anything it can't express is listed, not guessed.</p>
@@ -149,35 +186,51 @@
     <div class="container">
       <div class="section-head">
         <div>
-          <span class="eyebrow">How a payment is checked</span>
+          <span class="eyebrow"><span class="num">03</span>How a payment is checked</span>
           <h2 class="h2">Four rungs. Each one only runs when the one below can't settle it.</h2>
         </div>
         <p>Any rung can block. Any failure, whether a timeout, malformed output or missing verdict, escalates instead of approving. Nothing is paid until the receipt says approved.</p>
       </div>
       <div class="steps4">
         <div class="card stepcard">
-          <div class="step-num">01</div><div class="kind-bar" style="background:var(--code)"></div>
+          <div class="step-num">01 / 04</div><div class="kind-bar" style="background:var(--code)"></div>
           <h3 class="h3">Code rules</h3>
+          <p class="step-sub">Free, instant, on every payment.</p>
           <p>Allow and deny lists, caps, your plain-English rules, lookalike payees, duplicate and split payments, unusual amounts, hidden instructions, and payees missing from Kite's directory.</p>
           <div class="facts"><span>Runs on <b>every payment</b></span><span>Cost <b>~$0</b></span></div>
         </div>
         <div class="card stepcard">
-          <div class="step-num">02</div><div class="kind-bar" style="background:var(--llm)"></div>
+          <div class="step-num">02 / 04</div><div class="kind-bar" style="background:var(--llm)"></div>
           <h3 class="h3">SERV reasoning</h3>
+          <p class="step-sub">Does it fit the agent's task?</p>
           <p>Does this purchase follow from the agent's task? A strict JSON schema validated in code, with SERV's PromptGuard and Shadow Agent on every call.</p>
           <div class="facts"><span>Runs at <b>≥ $1 or new payee</b></span><span>Cost <b>~$0.0008</b></span></div>
         </div>
         <div class="card stepcard">
-          <div class="step-num">03</div><div class="kind-bar" style="background:var(--network)"></div>
+          <div class="step-num">03 / 04</div><div class="kind-bar" style="background:var(--network)"></div>
           <h3 class="h3">Reppo verdict</h3>
+          <p class="step-sub">An independent second opinion.</p>
           <p>An independent network evaluation: accept proceeds, revise goes to you, reject blocks. Low-confidence accepts also go to you.</p>
           <div class="facts"><span>Runs at <b>≥ $20 or a serious flag</b></span><span>Cost <b>$0.22</b></span></div>
         </div>
         <div class="card stepcard">
-          <div class="step-num">04</div><div class="kind-bar" style="background:var(--human)"></div>
+          <div class="step-num">04 / 04</div><div class="kind-bar" style="background:var(--human)"></div>
           <h3 class="h3">Your passkey</h3>
+          <p class="step-sub">The last word is yours.</p>
           <p>A one-shot Kite session scoped to exactly this payment. You approve it with your passkey, and the payment goes through that session only.</p>
-          <div class="facts"><span>Runs when <b>Reppo says re-evaluate</b></span><span>Cost <b>one tap</b></span></div>
+          <div class="facts"><span>Runs when <b>Reppo says re-evaluate, or the price can't be confirmed</b></span><span>Cost <b>one tap</b></span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="band-wrap">
+    <div class="container">
+      <div class="band">
+        <p><b>Autonomous, inside hard limits.</b> Agents pay on their own up to the limits you set. Anything bigger, stranger or off-task waits for an independent verdict or your passkey, and nothing is paid until the receipt says approved.</p>
+        <div class="band-actions">
+          <a class="btn lime go" href="/docs#live">Go live with Kite</a>
+          <a class="btn ghost go" href="/docs#security">Security model</a>
         </div>
       </div>
     </div>
@@ -187,7 +240,7 @@
     <div class="container">
       <div class="section-head">
         <div>
-          <span class="eyebrow">Does it learn?</span>
+          <span class="eyebrow"><span class="num">04</span>Does it learn?</span>
           <h2 class="h2">Six weeks of traffic, with and without calibration.</h2>
         </div>
         <p id="replayNote">Loading the replay…</p>
@@ -208,10 +261,10 @@
     <div class="container">
       <div class="section-head">
         <div>
-          <span class="eyebrow">Integrations</span>
+          <span class="eyebrow"><span class="num">05</span>Integrations</span>
           <h2 class="h2">Built on SERV, Reppo and Kite.</h2>
         </div>
-        <p>Each integration is optional. A tier without credentials runs an offline stand-in, and every receipt says which mode answered.</p>
+        <p>In the demo, a tier without credentials runs an offline stand-in. With real payments, it hands the decision to you instead. Every receipt says which mode answered.</p>
       </div>
       <div class="integrations" id="integrations"></div>
     </div>
@@ -221,10 +274,10 @@
     <div class="container">
       <div class="section-head">
         <div>
-          <span class="eyebrow">Connect an agent</span>
-          <h2 class="h2">One config entry. Every payment goes through Countersign.</h2>
+          <span class="eyebrow"><span class="num">06</span>Connect an agent</span>
+          <h2 class="h2">One config entry. Every payment goes through Tripwire.</h2>
         </div>
-        <p>Countersign ships as an MCP server. Any MCP-capable agent gets a <code>countersign_pay</code> tool and pays through it instead of calling Kite directly.</p>
+        <p>Tripwire ships as an MCP server. Any MCP-capable agent gets a <code>tripwire_pay</code> tool and pays through it instead of calling Kite directly.</p>
       </div>
       <div class="connect-grid">
         <div class="card">
@@ -236,9 +289,9 @@
         <div class="card">
           <div class="card-head"><h3>Tools the agent gets</h3></div>
           <ul class="list">
-            <li><b class="mono">countersign_pay</b><div class="agent-task">Request a payment. Returns approved, blocked or pending with the receipt. Blocked means stop: the agent is told not to work around it.</div></li>
-            <li><b class="mono">countersign_receipt</b><div class="agent-task">Look up a decision: every check, its cost and reasons.</div></li>
-            <li><b class="mono">countersign_policy</b><div class="agent-task">Allowance left, caps, thresholds and rules, so the agent can plan within them.</div></li>
+            <li><b class="mono">tripwire_pay</b><div class="agent-task">Request a payment. Returns approved, blocked or pending with the receipt. Blocked means stop: the agent is told not to work around it.</div></li>
+            <li><b class="mono">tripwire_receipt</b><div class="agent-task">Look up a decision: every check, its cost and reasons.</div></li>
+            <li><b class="mono">tripwire_policy</b><div class="agent-task">Allowance left, caps, thresholds and rules, so the agent can plan within them.</div></li>
           </ul>
         </div>
       </div>
@@ -247,19 +300,17 @@
 </main>
 
 <footer class="footer">
-  <div class="container">
-    <div>
-      <a class="wordmark" href="/">Countersign</a>
-      <p>A tiered co-signer for Kite agent allowances. Built for the OpenServ SERV Hackathon, Kite track.</p>
+  <div class="footer-card">
+    <div class="footer-grid">
+      <div class="footer-brand">
+        <a class="brand" href="/"><svg class="mark" viewBox="0 0 28 28" aria-hidden="true"><rect width="28" height="28" rx="7"/><path d="M4.5 17.5h5.5l2.6-7 3.2 10 2.6-6.5h5.1"/></svg><span class="wordmark">Tripwire</span></a>
+        <p>A tripwire between your agents' Kite allowance and every payment: code rules, SERV reasoning, a Reppo verdict and your passkey, with a receipt for every decision.</p>
+      </div>
+      <nav aria-label="Product"><span class="label">Product</span><a href="/">Dashboard</a><a href="/#policy-editor">Plain-English policy</a><a href="/#replay">Replay</a><a href="/#connect">Connect an agent</a></nav>
+      <nav aria-label="Docs"><span class="label">Docs</span><a href="/docs#quickstart">Quickstart</a><a href="/docs#live">Going live</a><a href="/docs#api">API reference</a><a href="/docs#security">Security model</a></nav>
+      <nav aria-label="Built on"><span class="label">Built on</span><a href="https://openserv.ai" rel="noopener">OpenServ SERV ↗</a><a href="https://reppo.xyz" rel="noopener">Reppo ↗</a><a href="https://gokite.ai" rel="noopener">Kite Agent Passport ↗</a></nav>
     </div>
-    <nav aria-label="Footer">
-      <a href="/docs">Docs</a>
-      <a href="/docs#api">API reference</a>
-      <a href="/docs#configuration">Configuration</a>
-      <a href="#policy-editor">Policy</a>
-      <a href="#connect">Connect an agent</a>
-      <a href="#replay">Replay</a>
-    </nav>
+    <div class="footer-base"><span>© 2026 Tripwire</span><span>Agents spend · bad payments trip the wire</span></div>
   </div>
 </footer>
 <script src="/app.js" type="module"></script>

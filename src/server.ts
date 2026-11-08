@@ -1,62 +1,129 @@
 // HTTP API + dashboard. Binds to 127.0.0.1 by default; set HOST to expose it.
+//
+// Two ways to run it:
+// - Demo (default): KITE_MODE=mock, no owner token, loopback only. Open dashboard, scripted demo, no real money.
+// - Live: KITE_MODE=kpass pays real money through Kite. Requires TRIPWIRE_OWNER_TOKEN (dashboard login),
+//   per-agent API keys in TRIPWIRE_AGENT_KEYS, and the owner's policy (POLICY_FILE or a saved one).
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, extname, join, normalize } from "node:path";
+import { existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
+import { dirname, extname, join, normalize, sep } from "node:path";
 import { Calibration } from "./calibration.ts";
-import { DEMO_POLICY, describeModes, loadConfig } from "./config.ts";
+import { DEMO_POLICY, PROJECT_ROOT, describeModes, loadConfig, loadPolicyFile, policyProblems } from "./config.ts";
 import { compilePolicy, type PolicyProposal } from "./policyCompiler.ts";
 import { randomUUID } from "node:crypto";
+import { COOKIE, LoginLimiter, identify, loadAuth, same, sameOrigin, sessionValue, type Caller } from "./auth.ts";
 import { Engine } from "./engine.ts";
 import { runReplay, type WeekResult } from "./replay.ts";
 import { AGENTS, demoScript } from "./scenarios.ts";
 import { validateIntent } from "./validate.ts";
-import type { PaymentIntent, Receipt } from "./types.ts";
+import type { PaymentIntent, Policy, Receipt } from "./types.ts";
 
-const ROOT = new URL("..", import.meta.url).pathname;
+const ROOT = PROJECT_ROOT;
 const PUBLIC = join(ROOT, "public");
-const STATE_FILE = process.env.STATE_FILE ?? join(ROOT, "data", "state.json");
+
+const port = Number(process.env.PORT ?? 8787);
+const host = process.env.HOST ?? "127.0.0.1";
+const PUBLIC_URL = (process.env.PUBLIC_URL ?? `http://${host.includes(":") ? `[${host}]` : host}:${port}`).replace(/\/$/, "");
+const NOTIFY_URL = process.env.NOTIFY_WEBHOOK_URL || undefined;
 
 const cfg = loadConfig();
-cfg.policy = structuredClone(DEMO_POLICY);
+const LIVE = cfg.kiteMode === "kpass";
+// Live and demo never share state: demo receipts are not real payments.
+const STATE_FILE = process.env.STATE_FILE ?? join(ROOT, "data", LIVE ? "live-state.json" : "state.json");
+const loopback = /^(127\.\d+\.\d+\.\d+|::1|localhost)$/.test(host);
+
+function fail(msg: string): never {
+  console.error(`\nTripwire can't start: ${msg}\n`);
+  process.exit(1);
+}
+
+let auth: ReturnType<typeof loadAuth>;
+try {
+  auth = loadAuth();
+} catch (err) {
+  fail((err as Error).message);
+}
+if (!auth.ownerToken && (LIVE || !loopback)) {
+  fail(`${LIVE ? "KITE_MODE=kpass moves real money" : `HOST=${host} is reachable beyond this machine`}, so set TRIPWIRE_OWNER_TOKEN (24+ random characters, e.g. \`openssl rand -hex 24\`).`);
+}
+if (LIVE && !auth.agentKeys.size) fail("Live mode needs at least one agent key: TRIPWIRE_AGENT_KEYS=agent-id:key (24+ characters each).");
+if (cfg.kite?.payFrom === "session" && !cfg.kite.sessionId) fail("KITE_PAY_FROM=session needs KITE_SESSION_ID.");
+
+/** Agents shown on the dashboard and accepted by the policy compiler. Live: the ones with API keys. */
+const agentList = () =>
+  auth.agentKeys.size ? [...new Set(auth.agentKeys.values())].map((id) => ({ id, task: "" })) : Object.values(AGENTS);
+
+function startingPolicy(): Policy {
+  if (process.env.POLICY_FILE) {
+    try {
+      return loadPolicyFile(process.env.POLICY_FILE);
+    } catch (err) {
+      fail((err as Error).message);
+    }
+  }
+  if (LIVE) return undefined as never; // filled from the state file below, or startup fails
+  return structuredClone(DEMO_POLICY);
+}
+
+cfg.policy = startingPolicy();
 /** Compiled policy proposals waiting for the owner to apply or discard them. */
 const proposals = new Map<string, PolicyProposal & { basedOn: string }>();
 let engine = createEngine();
-let demoQueue: PaymentIntent[] = demoScript();
+if (!cfg.policy) fail("Live mode needs your policy: set POLICY_FILE (start from policy.example.json).");
+let demoQueue: PaymentIntent[] = LIVE ? [] : demoScript();
 let replayCache: { calibrated: WeekResult[]; baseline: WeekResult[] } | undefined;
 const sseClients = new Set<ServerResponse>();
+const limiter = new LoginLimiter();
 
 function createEngine(fresh = false): Engine {
   let calibration = new Calibration();
   let receipts: Receipt[] = [];
   if (!fresh && existsSync(STATE_FILE)) {
+    let saved: any;
     try {
-      const saved = JSON.parse(readFileSync(STATE_FILE, "utf8"));
+      saved = JSON.parse(readFileSync(STATE_FILE, "utf8"));
+    } catch (err) {
+      // Never silently start clean in live mode: the file holds what was paid.
+      if (LIVE) fail(`${STATE_FILE} is unreadable (${(err as Error).message}). Restore it from a backup or move it aside.`);
+    }
+    if (saved) {
       calibration = Calibration.fromJSON(saved.calibration);
-      if (saved.policy) cfg.policy = saved.policy;
-      // Anything left pending when the server stopped can no longer be answered: record it as blocked.
-      receipts = (saved.receipts ?? []).map((r: Receipt) =>
-        r.status.startsWith("pending") ? { ...r, status: "blocked", decidedAt: r.decidedAt ?? new Date().toISOString() } : r,
-      );
-    } catch {
-      /* corrupt state file: start clean */
+      // POLICY_FILE only seeds the first start; after that the saved policy (edited on the dashboard) wins.
+      if (saved.policy && !policyProblems(saved.policy).length) cfg.policy = saved.policy;
+      const now = new Date().toISOString();
+      receipts = (saved.receipts ?? []).map((r: Receipt) => {
+        // A payment interrupted mid-flight may have gone through: keep it counted until it's rechecked.
+        if (r.status === "paying") return { ...r, status: "payment_unknown", payment: { ...r.payment, error: "Tripwire stopped while this payment was being made. Recheck it." } };
+        // Anything left waiting for a decision can no longer be answered: record it as blocked.
+        if (r.status.startsWith("pending")) return { ...r, status: "blocked", decidedAt: r.decidedAt ?? now };
+        return r;
+      });
     }
   }
   const e = new Engine(cfg, calibration);
   for (const r of receipts) e.receipts.set(r.intent.id, r);
-  e.onChange = (r) => {
-    persist(e);
+  e.onChange = (r, durable) => {
+    // After a demo reset, decisions still running on the replaced engine must not write its state back.
+    if (e !== engine) return;
+    persist(e, durable);
     broadcast({ type: "receipt", receipt: r });
   };
+  e.onHumanNeeded = (r, approvalUrl) => notify(r, approvalUrl);
   return e;
 }
 
 let persistTimer: NodeJS.Timeout | undefined;
-function persist(e: Engine) {
+/** Atomic write (temp file + rename). `now` writes immediately, e.g. right before money moves. */
+function persist(e: Engine, now = false) {
   clearTimeout(persistTimer);
-  persistTimer = setTimeout(() => {
+  const write = () => {
     mkdirSync(dirname(STATE_FILE), { recursive: true });
-    writeFileSync(STATE_FILE, JSON.stringify({ receipts: [...e.receipts.values()], calibration: e.calibration.toJSON(), policy: cfg.policy }, null, 2));
-  }, 200);
+    const tmp = `${STATE_FILE}.${process.pid}.tmp`;
+    writeFileSync(tmp, JSON.stringify({ receipts: [...e.receipts.values()], calibration: e.calibration.toJSON(), policy: cfg.policy }, null, 2), { mode: 0o600 });
+    renameSync(tmp, STATE_FILE);
+  };
+  if (now) write();
+  else persistTimer = setTimeout(write, 200);
 }
 
 function broadcast(msg: unknown) {
@@ -64,72 +131,196 @@ function broadcast(msg: unknown) {
   for (const c of sseClients) c.write(line);
 }
 
+/** Tells the owner a payment is waiting on them (Slack-compatible incoming webhook). */
+function notify(r: Receipt, approvalUrl?: string) {
+  if (!NOTIFY_URL) return;
+  const i = r.intent;
+  const link = `${PUBLIC_URL}/r/${i.id}`;
+  const text = `Tripwire: ${i.agentId} wants to pay $${i.amountUsd.toFixed(2)} to ${i.payeeName} (${i.payee}) for "${i.purpose}". ${approvalUrl ? `Approve or decline with your passkey: ${approvalUrl}` : `Review: ${link}`}`;
+  fetch(NOTIFY_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text, receiptUrl: link, approvalUrl, id: i.id, amountUsd: i.amountUsd, payee: i.payee, agentId: i.agentId }),
+    signal: AbortSignal.timeout(5000),
+  }).catch((err) => console.error("notify failed:", err.message));
+}
+
 function state() {
   return {
+    live: LIVE,
     modes: describeModes(cfg),
     policy: cfg.policy,
     spentUsd: engine.spentUsd(),
     demoRemaining: demoQueue.length,
     receipts: [...engine.receipts.values()].sort((a, b) => b.intent.createdAt.localeCompare(a.intent.createdAt)),
     calibration: engine.calibration.toJSON(),
-    agents: Object.values(AGENTS),
+    agents: agentList(),
   };
 }
 
-function json(res: ServerResponse, status: number, body: unknown) {
-  res.writeHead(status, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+/** What an agent may see: its limits, never other agents' payments. */
+function agentPolicy(agentId: string) {
+  const p = cfg.policy;
+  return {
+    agentId,
+    allowanceUsd: p.allowanceUsd,
+    spentUsd: engine.spentUsd(),
+    leftUsd: Math.max(0, p.allowanceUsd - engine.spentUsd()),
+    maxPerTxUsd: Math.min(p.maxPerTxUsd, p.agentRules?.find((r) => r.agentId === agentId)?.maxPerTxUsd ?? Infinity),
+    tier1MinUsd: p.tier1MinUsd,
+    tier2MinUsd: p.tier2MinUsd,
+    resetPeriod: p.resetPeriod ?? "never",
+    knownPayees: p.knownPayees,
+    denyPayees: p.denyPayees,
+    rules: p.agentRules?.filter((r) => r.agentId === agentId) ?? [],
+  };
+}
+
+const SECURITY_HEADERS = {
+  "X-Content-Type-Options": "nosniff",
+  "Referrer-Policy": "no-referrer",
+  "X-Frame-Options": "DENY",
+};
+
+function json(res: ServerResponse, status: number, body: unknown, headers: Record<string, string> = {}) {
+  res.writeHead(status, { "Content-Type": "application/json", "Cache-Control": "no-store", ...SECURITY_HEADERS, ...headers });
   res.end(JSON.stringify(body));
 }
 
 async function readBody(req: IncomingMessage, limit = 64 * 1024): Promise<any> {
   let size = 0;
   const chunks: Buffer[] = [];
+  let body: unknown;
   for await (const c of req) {
     size += c.length;
-    if (size > limit) throw new Error("Body too large");
+    if (size > limit) throw Object.assign(new Error("Body too large"), { status: 413 });
     chunks.push(c);
   }
-  return chunks.length ? JSON.parse(Buffer.concat(chunks).toString("utf8")) : {};
+  try {
+    body = chunks.length ? JSON.parse(Buffer.concat(chunks).toString("utf8")) : {};
+  } catch {
+    throw Object.assign(new Error("Body must be JSON"), { status: 400 });
+  }
+  if (!body || typeof body !== "object" || Array.isArray(body)) throw Object.assign(new Error("Body must be a JSON object"), { status: 400 });
+  return body;
 }
 
-const MIME: Record<string, string> = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".svg": "image/svg+xml" };
+const MIME: Record<string, string> = { ".html": "text/html; charset=utf-8", ".js": "text/javascript", ".css": "text/css", ".svg": "image/svg+xml", ".json": "application/json" };
+const CSP =
+  "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
+  "font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'";
 
 function serveStatic(res: ServerResponse, path: string) {
   const file = normalize(join(PUBLIC, path === "/" ? "index.html" : path));
-  if (!file.startsWith(PUBLIC) || !existsSync(file)) return json(res, 404, { error: "not found" });
-  res.writeHead(200, { "Content-Type": MIME[extname(file)] ?? "application/octet-stream" });
+  if (!file.startsWith(PUBLIC + sep) || !existsSync(file) || !statSync(file).isFile()) return json(res, 404, { error: "not found" });
+  res.writeHead(200, { "Content-Type": MIME[extname(file)] ?? "application/octet-stream", "Content-Security-Policy": CSP, "Cache-Control": "no-cache", ...SECURITY_HEADERS });
   res.end(readFileSync(file));
 }
+
+const clientIp = (req: IncomingMessage) => req.socket.remoteAddress ?? "?";
+const cookieFlags = (req: IncomingMessage) =>
+  `HttpOnly; SameSite=Strict; Path=/; Max-Age=${30 * 24 * 3600}${process.env.COOKIE_SECURE === "true" || req.headers["x-forwarded-proto"] === "https" || PUBLIC_URL.startsWith("https:") ? "; Secure" : ""}`;
 
 const server = createServer(async (req, res) => {
   const url = new URL(req.url ?? "/", "http://localhost");
   const path = url.pathname;
+  const method = req.method ?? "GET";
   try {
-    if (req.method === "GET" && path === "/api/state") return json(res, 200, state());
+    // ---------- Public: pages, login ----------
+    if (method === "GET" && path === "/api/session") {
+      const who = identify(req, auth);
+      return json(res, 200, { authRequired: Boolean(auth.ownerToken), role: who.role, live: LIVE });
+    }
+    if (method === "POST" && path === "/api/login") {
+      if (!auth.ownerToken) return json(res, 200, { ok: true });
+      if (limiter.blocked(clientIp(req))) return json(res, 429, { error: "Too many attempts. Try again in a few minutes." });
+      const { token } = await readBody(req, 4096);
+      if (typeof token !== "string" || !same(token, auth.ownerToken)) {
+        limiter.fail(clientIp(req));
+        return json(res, 401, { error: "Wrong owner token." });
+      }
+      return json(res, 200, { ok: true }, { "Set-Cookie": `${COOKIE}=${sessionValue(auth.ownerToken)}; ${cookieFlags(req)}` });
+    }
+    if (method === "POST" && path === "/api/logout") {
+      return json(res, 200, { ok: true }, { "Set-Cookie": `${COOKIE}=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0` });
+    }
+    if (method === "GET" && path === "/api/health") return json(res, 200, { ok: true, live: LIVE });
 
-    if (req.method === "GET" && path === "/api/events") {
-      res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-store", Connection: "keep-alive" });
-      res.write(": connected\n\n");
-      sseClients.add(res);
-      req.on("close", () => sseClients.delete(res));
-      return;
+    if (!path.startsWith("/api/")) {
+      if (method !== "GET") return json(res, 405, { error: "method not allowed" });
+      if (/^\/r\/[\w-]+$/.test(path)) return serveStatic(res, "/receipt.html");
+      if (path === "/docs" || path === "/docs/") return serveStatic(res, "/docs.html");
+      return serveStatic(res, path);
     }
 
-    const receiptMatch = path.match(/^\/api\/receipts\/([\w-]+)$/);
-    if (req.method === "GET" && receiptMatch) {
-      const r = engine.receipts.get(receiptMatch[1]);
-      return r ? json(res, 200, r) : json(res, 404, { error: "unknown receipt" });
-    }
+    // ---------- Everything else needs a caller ----------
+    const who: Caller = identify(req, auth);
+    if (who.role === "anon") return json(res, 401, { error: "Sign in with the owner token, or send an agent API key as a Bearer token." });
+    if (method !== "GET" && !req.headers.authorization && !sameOrigin(req)) return json(res, 403, { error: "Cross-site request refused." });
+    const owner = who.role === "owner";
+    const ownerOnly = () => json(res, 403, { error: "Only the owner can do this." });
 
     // Agents submit intents here. Responds immediately; the decision streams over /api/events.
-    if (req.method === "POST" && path === "/api/intents") {
-      const v = validateIntent(await readBody(req));
+    if (method === "POST" && path === "/api/intents") {
+      const body = await readBody(req);
+      if (who.role === "agent") {
+        if (body.agentId !== undefined && body.agentId !== who.agentId) return json(res, 403, { error: `This key belongs to ${who.agentId}.` });
+        body.agentId = who.agentId;
+      }
+      const v = validateIntent(body);
       if (typeof v === "string") return json(res, 400, { error: v });
+      if (LIVE && !v.url) return json(res, 400, { error: "url is required in live mode: it is the x402 endpoint Kite pays." });
+      // Same agent + same requestKey: return the original decision instead of paying twice.
+      if (v.requestKey) {
+        const prior = [...engine.receipts.values()].find((r) => r.intent.agentId === v.agentId && r.intent.requestKey === v.requestKey);
+        if (prior) return json(res, 200, { id: prior.intent.id, receipt: `/api/receipts/${prior.intent.id}`, duplicate: true, status: prior.status });
+      }
       engine.decide(v).catch((e) => console.error("decide failed", e));
       return json(res, 202, { id: v.id, receipt: `/api/receipts/${v.id}` });
     }
 
-    if (req.method === "POST" && path === "/api/demo/next") {
+    const receiptMatch = path.match(/^\/api\/receipts\/([\w-]+)$/);
+    if (method === "GET" && receiptMatch) {
+      const r = engine.receipts.get(receiptMatch[1]);
+      if (!r || (who.role === "agent" && r.intent.agentId !== who.agentId)) return json(res, 404, { error: "unknown receipt" });
+      return json(res, 200, r);
+    }
+
+    if (method === "GET" && path === "/api/agent/policy") {
+      return json(res, 200, agentPolicy(who.role === "agent" ? who.agentId : (url.searchParams.get("agentId") ?? "owner")));
+    }
+
+    if (!owner) return ownerOnly();
+
+    // ---------- Owner ----------
+    if (method === "GET" && path === "/api/state") return json(res, 200, state());
+
+    if (method === "GET" && path === "/api/events") {
+      res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-store", Connection: "keep-alive", ...SECURITY_HEADERS });
+      res.write(": connected\n\n");
+      sseClients.add(res);
+      const ping = setInterval(() => res.write(": ping\n\n"), 25_000);
+      req.on("close", () => {
+        clearInterval(ping);
+        sseClients.delete(res);
+      });
+      return;
+    }
+
+    // Unknown payment outcomes: ask Kite again (same idempotency key, never pays twice), or settle by hand.
+    const act = path.match(/^\/api\/receipts\/([\w-]+)\/(recheck|resolve)$/);
+    if (method === "POST" && act) {
+      const r = engine.receipts.get(act[1]);
+      if (!r) return json(res, 404, { error: "unknown receipt" });
+      if (r.status !== "payment_unknown") return json(res, 409, { error: "Only payments with an unknown outcome can be rechecked or resolved." });
+      if (act[2] === "recheck") return json(res, 200, await engine.recheck(act[1]));
+      const { answer } = await readBody(req);
+      if (answer !== "paid" && answer !== "not_paid") return json(res, 400, { error: "answer must be paid|not_paid" });
+      return json(res, 200, engine.resolve(act[1], answer));
+    }
+
+    if (method === "POST" && path === "/api/demo/next") {
+      if (LIVE) return json(res, 409, { error: "The scripted demo is off in live mode." });
       const next = demoQueue.shift();
       if (!next) return json(res, 409, { error: "Demo script finished; reset to run again." });
       const fresh = { ...next, createdAt: new Date().toISOString() };
@@ -137,18 +328,30 @@ const server = createServer(async (req, res) => {
       return json(res, 202, { id: fresh.id, remaining: demoQueue.length });
     }
 
+    if (method === "POST" && path === "/api/demo/reset") {
+      if (LIVE) return json(res, 409, { error: "Reset is off in live mode: the history records real payments." });
+      cfg.policy = structuredClone(DEMO_POLICY);
+      proposals.clear();
+      replayCache = undefined;
+      engine = createEngine(true);
+      demoQueue = demoScript();
+      persist(engine, true);
+      broadcast({ type: "reset" });
+      return json(res, 200, { ok: true });
+    }
+
     // Plain-English policy: compile returns a preview; nothing changes until the owner applies it.
-    if (req.method === "POST" && path === "/api/policy/compile") {
+    if (method === "POST" && path === "/api/policy/compile") {
       const { text } = await readBody(req);
       if (typeof text !== "string" || !text.trim() || text.length > 2000) return json(res, 400, { error: "text must be 1–2000 characters" });
-      const proposal = await compilePolicy(text, cfg.policy, Object.values(AGENTS), cfg.serv);
+      const proposal = await compilePolicy(text, cfg.policy, agentList(), cfg.serv);
       const id = randomUUID();
       proposals.set(id, { ...proposal, basedOn: JSON.stringify(cfg.policy) });
       if (proposals.size > 20) proposals.delete(proposals.keys().next().value!);
       return json(res, 200, { id, ...proposal }); // basedOn stays server-side
     }
 
-    if (req.method === "POST" && path === "/api/policy/apply") {
+    if (method === "POST" && path === "/api/policy/apply") {
       const { id } = await readBody(req);
       const proposal = proposals.get(id);
       if (!proposal) return json(res, 404, { error: "Unknown or expired proposal; compile again." });
@@ -156,31 +359,20 @@ const server = createServer(async (req, res) => {
       proposals.delete(id);
       cfg.policy = proposal.policy;
       replayCache = undefined; // the replay runs against the current policy
-      persist(engine);
+      persist(engine, true);
       broadcast({ type: "policy" });
       return json(res, 200, { ok: true, policy: cfg.policy });
     }
 
-    if (req.method === "POST" && path === "/api/demo/reset") {
-      cfg.policy = structuredClone(DEMO_POLICY);
-      proposals.clear();
-      replayCache = undefined;
-      engine = createEngine(true);
-      demoQueue = demoScript();
-      persist(engine);
-      broadcast({ type: "reset" });
-      return json(res, 200, { ok: true });
-    }
-
     const stepUp = path.match(/^\/api\/stepup\/([\w-]+)$/);
-    if (req.method === "POST" && stepUp) {
-      if (cfg.kiteMode === "kpass") return json(res, 409, { error: "Live mode: approve with your passkey in Kite Passport." });
+    if (method === "POST" && stepUp) {
+      if (LIVE) return json(res, 409, { error: "Live mode: approve with your passkey in Kite Passport." });
       const { answer } = await readBody(req);
       if (answer !== "approved" && answer !== "declined") return json(res, 400, { error: "answer must be approved|declined" });
       return engine.answerHuman(stepUp[1], answer) ? json(res, 200, { ok: true }) : json(res, 404, { error: "nothing pending" });
     }
 
-    if (req.method === "GET" && path === "/api/replay") {
+    if (method === "GET" && path === "/api/replay") {
       // Runs against the current policy; runReplay forces the offline adapters, so this costs nothing.
       replayCache ??= {
         calibrated: await runReplay(cfg, 6, { calibrate: true }),
@@ -189,18 +381,24 @@ const server = createServer(async (req, res) => {
       return json(res, 200, replayCache);
     }
 
-    if (req.method === "GET" && /^\/r\/[\w-]+$/.test(path)) return serveStatic(res, "/receipt.html");
-    if (req.method === "GET" && (path === "/docs" || path === "/docs/")) return serveStatic(res, "/docs.html");
-    if (req.method === "GET") return serveStatic(res, path);
-    json(res, 405, { error: "method not allowed" });
+    json(res, method === "GET" ? 404 : 405, { error: method === "GET" ? "not found" : "method not allowed" });
   } catch (err) {
-    json(res, 400, { error: (err as Error).message });
+    const status = (err as any).status ?? 500;
+    if (status === 500) console.error(err);
+    if (!res.headersSent) json(res, status, { error: status === 500 ? "Internal error" : (err as Error).message });
   }
 });
 
-const port = Number(process.env.PORT ?? 8787);
-const host = process.env.HOST ?? "127.0.0.1";
 server.listen(port, host, () => {
-  console.log(`Countersign on http://${host}:${port}`);
+  console.log(`Tripwire on http://${host.includes(":") ? `[${host}]` : host}:${port}${PUBLIC_URL.startsWith("http://127") ? "" : ` (public: ${PUBLIC_URL})`}`);
   console.log("Modes:", describeModes(cfg));
+  console.log(auth.ownerToken ? `Owner login required. ${auth.agentKeys.size} agent key(s) loaded.` : "Open local demo: no login (loopback only).");
 });
+
+// Finish the in-flight write before exiting.
+for (const sig of ["SIGINT", "SIGTERM"] as const) {
+  process.on(sig, () => {
+    persist(engine, true);
+    process.exit(0);
+  });
+}

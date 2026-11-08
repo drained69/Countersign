@@ -1,0 +1,14 @@
+{
+  "allowanceUsd": 50,
+  "resetPeriod": "weekly",
+  "maxPerTxUsd": 10,
+  "newPayeeMaxUsd": 2,
+  "tier1MinUsd": 0.5,
+  "tier2MinUsd": 5,
+  "duplicateWindowMinutes": 60,
+  "knownPayees": [
+    { "payee": "api.example.com", "name": "Example API (replace with the services your agents use)" }
+  ],
+  "denyPayees": [],
+  "agentRules": []
+}

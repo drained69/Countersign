@@ -42,9 +42,11 @@ export interface ServConfig {
   /** USD per 1M input / output tokens, for the receipt's cost line. */
   priceIn: number;
   priceOut: number;
+  /** Per-call timeout. Default 60 s. A timeout escalates the payment. */
+  timeoutMs?: number;
 }
 
-export const SERV_SYSTEM_PROMPT = `You are the task-match checker inside Countersign, a co-signer for AI agent payments.
+export const SERV_SYSTEM_PROMPT = `You are the task-match checker inside Tripwire, a co-signer for AI agent payments.
 Decide whether a proposed payment is consistent with the task the agent was given.
 Rules:
 - Judge only consistency between task, purpose, payee and amount. You cannot approve anything; you can only pass or escalate.
@@ -81,8 +83,16 @@ export function buildUserPrompt(intent: PaymentIntent): string {
     `Payee: ${intent.payeeName} (${intent.payee}), category: ${intent.category}`,
     `Amount: $${intent.amountUsd.toFixed(2)}`,
     `Stated purpose: ${intent.purpose}`,
-    `<vendor_text>${(intent.vendorText ?? "").slice(0, 2000)}</vendor_text>`,
+    `<vendor_text>${fenceSafe(intent.vendorText ?? "")}</vendor_text>`,
   ].join("\n");
+}
+
+/**
+ * Vendor text goes inside a <vendor_text> fence. Remove anything that looks like the fence's own tags, so the
+ * vendor can't close the fence early and write text the model would read as coming from Tripwire.
+ */
+export function fenceSafe(text: string, max = 2000): string {
+  return text.slice(0, max).replace(/<\s*\/?\s*vendor_text\s*>/gi, "[removed tag]");
 }
 
 /** Validates model output instead of trusting it. Throws on anything off-schema. */
@@ -133,6 +143,8 @@ export async function runTier1(intent: PaymentIntent, cfg: ServConfig): Promise<
     const res = await fetch(`${cfg.baseUrl}/v1/chat/completions`, {
       method: "POST",
       headers: { Authorization: `Bearer ${cfg.apiKey}`, "Content-Type": "application/json" },
+      // Measured live latency is 6-18 s; a hung call must escalate, not hold the payment forever.
+      signal: AbortSignal.timeout(cfg.timeoutMs ?? 60_000),
       body: JSON.stringify({
         model: cfg.model,
         messages: [
@@ -144,7 +156,7 @@ export async function runTier1(intent: PaymentIntent, cfg: ServConfig): Promise<
       }),
     });
     if (!res.ok) throw new Error(`SERV HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`);
-    const body = await res.json();
+    const body: any = await res.json();
     const message = body.choices?.[0]?.message ?? {};
     const tools = SERV_TOOLS.map((t) => t.function.name);
     // PromptGuard answers with a refusal and no content, before the model runs (0 tokens billed).

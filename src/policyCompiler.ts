@@ -252,7 +252,7 @@ export async function compilePolicy(text: string, current: Policy, agents: { id:
     }),
   });
   if (!res.ok) throw new Error(`SERV HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`);
-  const body = await res.json();
+  const body: any = await res.json();
   const msg = body.choices?.[0]?.message ?? {};
   if (!msg.content) throw new Error(msg.refusal ? "SERV PromptGuard rejected this policy text." : "SERV returned no policy.");
   const merged = applyProposal(JSON.parse(msg.content), current, agentIds, text);

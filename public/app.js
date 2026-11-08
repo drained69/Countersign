@@ -1,5 +1,5 @@
 // Dashboard: live feed over SSE, metrics, agents, payee trust, policy, demo controls, step-up, replay chart.
-const { esc, usd, time, modeClass } = window.CS;
+const { esc, usd, time, modeClass } = window.TW;
 const $ = (id) => document.getElementById(id);
 const MAX_MULTIPLIER = 4;
 
@@ -9,8 +9,18 @@ let replayData;
 const seen = new Set();
 let firstLoad = true;
 
+/** Fetch with JSON headers; a 401 means the dashboard needs the owner to sign in. */
+async function api(path, opts = {}) {
+  const res = await fetch(path, { ...opts, headers: { "Content-Type": "application/json", ...(opts.headers ?? {}) } });
+  if (res.status === 401) {
+    showLogin();
+    throw new Error("Sign in required");
+  }
+  return res;
+}
+
 async function refresh() {
-  state = await (await fetch("/api/state")).json();
+  state = await (await api("/api/state")).json();
   // Only animate decisions that arrive while the page is open.
   if (firstLoad) state.receipts.forEach((r) => seen.add(r.intent.id));
   firstLoad = false;
@@ -27,11 +37,15 @@ function render() {
     .join("");
   renderIntegrations(modes);
 
-  // Demo controls
+  $("heroMode").textContent = state.live ? "Live · real payments through Kite" : "Demo · no real money moves";
+  // Demo controls (off in live mode: every payment there is real)
+  $("next").hidden = $("reset").hidden = state.live;
   $("next").disabled = demoRemaining === 0;
-  $("demoHint").textContent = demoRemaining
-    ? `${demoRemaining} of 7 scripted payments left · each one shows a different rung deciding`
-    : "Demo script finished · reset to run it again";
+  $("demoHint").textContent = state.live
+    ? "Live: approved payments are paid through Kite with real money."
+    : demoRemaining
+      ? `${demoRemaining} of 7 scripted payments left · each one shows a different rung deciding`
+      : "Demo script finished · reset to run it again";
 
   // Metrics
   const pct = Math.min(100, (spentUsd / policy.allowanceUsd) * 100);
@@ -70,12 +84,13 @@ function render() {
   renderPolicy(policy);
 }
 
-const group = (s) => (s.startsWith("pending") ? "pending" : s);
+// Anything not yet settled (including a payment Kite couldn't confirm) sits under "waiting".
+const group = (s) => (s.startsWith("pending") || s === "paying" || s === "payment_unknown" ? "pending" : s);
 function countBy(receipts) {
   const c = { approved: 0, blocked: 0, pending: 0, waitingHuman: 0 };
   for (const r of receipts) {
     c[group(r.status)]++;
-    if (r.status === "pending_human") c.waitingHuman++;
+    if (r.status === "pending_human" || r.status === "payment_unknown") c.waitingHuman++;
   }
   return c;
 }
@@ -93,13 +108,13 @@ function emptyFeed(total) {
 /** A passkey step still open is waiting on you, not escalating further. */
 const outcomeLabel = (s, r) => (s.tier === 3 && s.outcome === "escalate" && r.status === "pending_human" ? "waiting" : s.outcome);
 
-const STATUS = { approved: "Approved", blocked: "Blocked", pending_human: "Waiting for you", pending_network: "Checking" };
+const STATUS = { approved: "Approved", blocked: "Blocked", pending_human: "Waiting for you", pending_network: "Checking", paying: "Paying", payment_unknown: "Check payment" };
 
 function decision(r) {
   const i = r.intent;
   const trail = r.steps
     .map((s) => `<span class="rung-chip ${s.kind} o-${s.outcome}" title="${esc(s.reasons.join(" "))}">
-        <span class="n">${s.tier}</span>${esc(window.CS.tierName[s.tier])}
+        <span class="n">${s.tier}</span>${esc(window.TW.tierName[s.tier])}
         <span class="o">${outcomeLabel(s, r)}</span>${String(s.detail?.promptGuard ?? "").startsWith("triggered") ? '<span class="m guard">PromptGuard</span>' : ""}${s.mode !== "live" ? `<span class="m">${s.mode}</span>` : ""}
       </span>`)
     .join('<span class="sep"></span>');
@@ -107,13 +122,31 @@ function decision(r) {
   const why = [...new Set(flagged.length ? flagged : r.steps.at(-1)?.reasons ?? [])].slice(0, 4);
   const est = liveCost(r);
   const live = state.modes.kite.startsWith("live");
+  const approvalUrl = r.steps.at(-1)?.detail?.approvalUrl;
+  const safeLink = typeof approvalUrl === "string" && /^https:\/\//.test(approvalUrl) ? approvalUrl : undefined;
   const stepUp = r.status === "pending_human"
     ? `<div class="stepup">
-        <p><b>Step-up requested.</b> Approve ${usd(i.amountUsd)} to ${esc(i.payeeName)}?${live ? " Confirm it with your passkey in Kite Passport." : ""}</p>
-        ${live ? "" : `<div class="actions">
+        <p><b>Step-up requested.</b> Approve ${usd(i.amountUsd)} to ${esc(i.payeeName)}?${live ? " Approve or decline with your passkey in Kite Passport; nothing is paid until you do." : ""}</p>
+        ${live
+          ? safeLink ? `<div class="actions"><a class="btn sm approve" href="${esc(safeLink)}" target="_blank" rel="noopener noreferrer">Open passkey approval →</a></div>` : ""
+          : `<div class="actions">
           <button class="btn sm approve" data-answer="approved" data-id="${esc(i.id)}">Approve</button>
           <button class="btn sm decline" data-answer="declined" data-id="${esc(i.id)}">Decline</button></div>`}
       </div>`
+    : "";
+  const p = r.payment;
+  const unknown = r.status === "payment_unknown"
+    ? `<div class="unknown-box">
+        <p><b>${p?.state === "held" ? "Kite is holding this payment." : "Kite couldn't confirm this payment."}</b> ${esc(sentence(p?.userMessage ?? p?.error ?? "It may have gone through"))} It still counts against the allowance. Never pay it again by other means.</p>
+        <div class="actions">
+          <button class="btn sm" data-pay="recheck" data-id="${esc(i.id)}">Ask Kite again</button>
+          <button class="btn sm outline" data-pay="paid" data-id="${esc(i.id)}">It was paid</button>
+          <button class="btn sm outline" data-pay="not_paid" data-id="${esc(i.id)}">It wasn't paid</button>
+        </div>
+      </div>`
+    : "";
+  const paidNote = p && r.status !== "payment_unknown" && (p.error || p.mode === "live")
+    ? `<div class="paid-note ${p.error ? "warn" : ""}">${p.state === "paid" ? `Paid through Kite${p.amountUsd !== undefined ? ` · ${usd(p.amountUsd)}` : ""}${p.paymentId ? ` · ${esc(p.paymentId)}` : ""}` : "Not paid"}${p.error ? ` · ${esc(p.error)}` : ""}</div>`
     : "";
   return `<article class="decision ${seen.has(i.id) ? "" : "new"}">
     <div class="d-top">
@@ -122,11 +155,11 @@ function decision(r) {
         <div class="d-payee">${esc(i.payeeName)}<span class="mono">${esc(i.payee)}</span></div>
         <div class="d-meta"><span class="agent">${esc(i.agentId)}</span>${esc(i.purpose)}</div>
       </div>
-      <span class="pill ${r.status}">${STATUS[r.status]}</span>
+      <span class="pill ${r.status}">${STATUS[r.status] ?? esc(r.status)}</span>
     </div>
     <div class="trail">${trail}</div>
     <ul class="reasons">${why.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>
-    ${stepUp}
+    ${stepUp}${unknown}${paidNote}
     <div class="d-foot">
       <span>${time(i.createdAt)} · planned tier ${r.plannedTier} · checks ${usd(r.verificationCostUsd)}${est > r.verificationCostUsd + 1e-9 ? ` (≈${usd(est)} live)` : ""}</span>
       <a href="/r/${encodeURIComponent(i.id)}">View receipt →</a>
@@ -134,15 +167,20 @@ function decision(r) {
   </article>`;
 }
 
+const sentence = (t) => (/[.!?]$/.test(t.trim()) ? t.trim() : `${t.trim()}.`);
+
 function renderAgents(receipts, policy) {
   const agents = state.agents ?? [];
+  $("agentCount").textContent = `${agents.length} on this allowance`;
+  $("policyLabel").textContent = state.live ? `Live${policy.resetPeriod && policy.resetPeriod !== "never" ? ` · resets ${policy.resetPeriod}` : ""}` : "Demo allowance";
   $("agents").innerHTML = agents.map((a) => {
     const mine = receipts.filter((r) => r.intent.agentId === a.id);
-    const spent = mine.filter((r) => r.status === "approved").reduce((s, r) => s + r.intent.amountUsd, 0);
+    // Paid, being paid, or possibly paid: the same money the allowance meter counts.
+    const spent = mine.filter((r) => ["approved", "paying", "payment_unknown"].includes(r.status)).reduce((s, r) => s + Math.max(r.payment?.amountUsd ?? 0, r.intent.amountUsd), 0);
     const blocked = mine.filter((r) => r.status === "blocked").length;
     return `<li>
       <div class="agent-row"><b>${esc(a.id)}</b><span class="mono small">${usd(spent)}</span></div>
-      <div class="agent-task">${esc(a.task)}</div>
+      ${a.task ? `<div class="agent-task">${esc(a.task)}</div>` : ""}
       <div class="mini-meter"><i style="width:${Math.min(100, (spent / policy.allowanceUsd) * 100)}%"></i></div>
       <div class="small muted" style="margin-top:6px">${mine.length} payment${mine.length === 1 ? "" : "s"} · ${blocked} blocked</div>
     </li>`;
@@ -216,7 +254,7 @@ $("compile").onclick = async () => {
   $("compile").disabled = true;
   $("compileStatus").textContent = state?.modes.serv.startsWith("live") ? "SERV is compiling your rules…" : "Compiling with the offline stand-in…";
   try {
-    const res = await fetch("/api/policy/compile", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text }) });
+    const res = await api("/api/policy/compile", { method: "POST", body: JSON.stringify({ text }) });
     const p = await res.json();
     if (!res.ok) throw new Error(p.error);
     proposalId = p.id;
@@ -244,7 +282,7 @@ $("proposalBody").addEventListener("click", async (e) => {
   }
   if (e.target.id === "applyProposal") {
     e.target.disabled = true;
-    const res = await fetch("/api/policy/apply", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id: proposalId }) });
+    const res = await api("/api/policy/apply", { method: "POST", body: JSON.stringify({ id: proposalId }) });
     if (!res.ok) return alert((await res.json()).error);
     proposalId = undefined;
     $("proposalMeta").textContent = "Applied";
@@ -254,11 +292,12 @@ $("proposalBody").addEventListener("click", async (e) => {
 });
 
 // ---------- Connect an agent (MCP) ----------
-$("mcpCli").textContent = `claude mcp add countersign \\
-  --env COUNTERSIGN_URL=${location.origin} \\
-  -- node /path/to/countersign/src/mcp.ts`;
+$("mcpCli").textContent = `claude mcp add tripwire \\
+  --env TRIPWIRE_URL=${location.origin} \\
+  --env TRIPWIRE_AGENT_KEY=<this agent's key> \\
+  -- node /path/to/tripwire/src/mcp.ts`;
 $("mcpJson").textContent = JSON.stringify(
-  { mcpServers: { countersign: { command: "node", args: ["/path/to/countersign/src/mcp.ts"], env: { COUNTERSIGN_URL: location.origin } } } },
+  { mcpServers: { tripwire: { command: "node", args: ["/path/to/tripwire/src/mcp.ts"], env: { TRIPWIRE_URL: location.origin, TRIPWIRE_AGENT_KEY: "<this agent's key>" } } } },
   null, 2,
 );
 
@@ -271,7 +310,7 @@ function renderIntegrations(modes) {
   $("integrations").innerHTML = items.map(([k, name, body]) => {
     const v = modes[k];
     const cls = modeClass(v);
-    const label = cls === "live" ? "Live" : cls === "sandbox" ? "Sandbox" : "Offline stand-in";
+    const label = cls === "live" ? "Live" : cls === "sandbox" ? "Sandbox" : v.startsWith("off") ? "Off · you decide" : "Offline stand-in";
     return `<div class="card integ">
       <div class="top"><h3 class="h3">${name}</h3><span class="status ${cls}">${label}</span></div>
       <p>${body}</p>
@@ -285,10 +324,25 @@ $("feed").addEventListener("click", async (e) => {
   const b = e.target.closest("button[data-answer]");
   if (!b) return;
   b.closest(".actions").querySelectorAll("button").forEach((x) => (x.disabled = true));
-  const res = await fetch(`/api/stepup/${encodeURIComponent(b.dataset.id)}`, {
-    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ answer: b.dataset.answer }),
-  });
+  const res = await api(`/api/stepup/${encodeURIComponent(b.dataset.id)}`, { method: "POST", body: JSON.stringify({ answer: b.dataset.answer }) });
   if (!res.ok) alert((await res.json()).error);
+});
+
+// Payments Kite couldn't confirm: recheck (same idempotency key, never pays twice) or settle by hand.
+$("feed").addEventListener("click", async (e) => {
+  const b = e.target.closest("button[data-pay]");
+  if (!b) return;
+  const what = b.dataset.pay;
+  if (what !== "recheck" && !confirm(what === "paid"
+    ? "Mark this payment as paid? Check Kite Passport's Activity page first."
+    : "Mark this payment as NOT paid? It stops counting against the allowance. Check Kite Passport's Activity page first.")) return;
+  b.closest(".actions").querySelectorAll("button").forEach((x) => (x.disabled = true));
+  const id = encodeURIComponent(b.dataset.id);
+  const res = what === "recheck"
+    ? await api(`/api/receipts/${id}/recheck`, { method: "POST" })
+    : await api(`/api/receipts/${id}/resolve`, { method: "POST", body: JSON.stringify({ answer: what }) });
+  if (!res.ok) alert((await res.json()).error);
+  refresh();
 });
 
 $("filters").addEventListener("click", (e) => {
@@ -301,26 +355,50 @@ $("filters").addEventListener("click", (e) => {
 
 $("next").onclick = async () => {
   $("next").disabled = true;
-  const res = await fetch("/api/demo/next", { method: "POST" });
+  const res = await api("/api/demo/next", { method: "POST" });
   if (!res.ok) alert((await res.json()).error);
 };
 $("reset").onclick = async () => {
   seen.clear();
-  await fetch("/api/demo/reset", { method: "POST" });
+  await api("/api/demo/reset", { method: "POST" });
   refresh();
 };
 
-new EventSource("/api/events").onmessage = (e) => {
-  refresh();
-  // A new policy changes what the replay would have decided.
-  try {
-    if (["policy", "reset"].includes(JSON.parse(e.data).type)) replay();
-  } catch {}
+// ---------- Sign-in ----------
+function showLogin() {
+  $("loginGate").hidden = false;
+  $("loginToken").focus();
+}
+
+$("loginForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  $("loginError").textContent = "";
+  const res = await fetch("/api/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ token: $("loginToken").value }) });
+  if (!res.ok) return ($("loginError").textContent = (await res.json()).error ?? "Couldn't sign in.");
+  location.reload();
+});
+
+$("logout").onclick = async () => {
+  await fetch("/api/logout", { method: "POST", headers: { "Content-Type": "application/json" } });
+  location.reload();
 };
+
+function connect() {
+  const events = new EventSource("/api/events");
+  events.onmessage = (e) => {
+    refresh().catch(() => {});
+    // A new policy changes what the replay would have decided.
+    try {
+      if (["policy", "reset"].includes(JSON.parse(e.data).type)) replay();
+    } catch {}
+  };
+  // Catch up on anything missed while the stream was down.
+  events.onopen = () => refresh().catch(() => {});
+}
 
 // ---------- Replay ----------
 async function replay() {
-  replayData = await (await fetch("/api/replay")).json();
+  replayData = await (await api("/api/replay")).json();
   const { calibrated: on, baseline: off } = replayData;
   const sum = (rows, k) => rows.reduce((a, r) => a + r[k], 0);
   const kpi = (big, label, sub) => `<div class="card metric"><div class="label">${label}</div><div class="value">${big}</div><div class="sub">${sub}</div></div>`;
@@ -364,5 +442,11 @@ function drawChart() {
 document.addEventListener("themechange", drawChart);
 matchMedia("(prefers-color-scheme: dark)").addEventListener("change", drawChart);
 
-refresh();
-replay();
+(async function boot() {
+  const session = await (await fetch("/api/session")).json();
+  $("logout").hidden = !session.authRequired;
+  if (session.authRequired && session.role !== "owner") return showLogin();
+  await refresh();
+  replay();
+  connect();
+})();

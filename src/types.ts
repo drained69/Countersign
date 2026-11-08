@@ -1,4 +1,4 @@
-// Core domain types for Countersign.
+// Core domain types for Tripwire.
 
 /** A payment an agent wants to make out of a shared Kite allowance. */
 export interface PaymentIntent {
@@ -19,6 +19,8 @@ export interface PaymentIntent {
   /** Extra request headers and JSON body for the x402 call (e.g. an invoice POST). */
   headers?: Record<string, string>;
   body?: unknown;
+  /** Agent-chosen key: resubmitting the same key returns the original decision instead of paying twice. */
+  requestKey?: string;
   /** Untrusted text returned by the vendor (invoice body, quote). Screened, never obeyed. */
   vendorText?: string;
   createdAt: string;
@@ -45,7 +47,11 @@ export type DecisionStatus =
   | "approved"
   | "blocked"
   | "pending_network"
-  | "pending_human";
+  | "pending_human"
+  /** Approved and being paid through Kite right now. Counts against the allowance. */
+  | "paying"
+  /** Kite could not confirm whether the payment went through. Counts against the allowance until resolved; never retried blindly. */
+  | "payment_unknown";
 
 export interface Receipt {
   intent: PaymentIntent;
@@ -73,6 +79,8 @@ export interface Policy {
   newPayeeMaxUsd?: number;
   /** Per-agent rules, usually compiled from the owner's plain-English policy. */
   agentRules?: AgentRule[];
+  /** When the allowance starts over (UTC). Weekly periods start on Monday. Default: never. */
+  resetPeriod?: "never" | "weekly" | "monthly";
 }
 
 export interface AgentRule {
@@ -88,8 +96,22 @@ export interface AgentRule {
 }
 
 export interface PaymentResult {
+  /** True only when the payment is known to have gone through. */
   executed: boolean;
+  /** paid: went through. not_paid: nothing was charged. unknown: may have gone through. held: charged amount is held by Kite pending the merchant's result. */
+  state: "paid" | "not_paid" | "unknown" | "held";
   mode: "live" | "mock";
+  /** Sent to Kite as the idempotency key; any retry of this payment reuses it. */
+  idempotencyKey?: string;
+  /** Amount Kite reports it paid, when it says. */
+  amountUsd?: number;
+  /** HTTP status the merchant answered with after payment. */
+  merchantStatus?: number;
+  paymentId?: string;
+  /** Kite's machine-readable error code, if any. */
+  errorCode?: string;
+  /** Kite's message for the owner, passed through as is. */
+  userMessage?: string;
   ref?: string;
   txHash?: string;
   /** Only ever a link returned by Kite. */
