@@ -371,11 +371,11 @@ test("Kite adapter: documented kpass commands, step-up session and directory sea
     const create = c.find((x) => x.startsWith("kpass session create"))!;
     const delegation = JSON.parse(create.match(/--delegation (\{.*\}) --separate/)![1]);
     assert.deepEqual(delegation.payment_policy, { max_amount_per_tx: "10.00", max_total_amount: "10.00", ttl_seconds: 900 }, "step-up session is capped at exactly this payment");
-    assert.match(create, /--separate --no-reuse --no-browser --output json$/);
-    assert.ok(c.some((x) => /^kpass session status --request-id req_1 --wait --timeout \d+ --output json$/.test(x)));
+    assert.match(create, /--separate --no-reuse --no-browser --output json --no-interactive$/);
+    assert.ok(c.some((x) => /^kpass session status --request-id req_1 --wait --timeout \d+ --output json --no-interactive$/.test(x)));
     const execs = c.filter((x) => x.startsWith("kpass session execute"));
-    assert.equal(execs[0], 'kpass session execute --url https://acme-billing.example/x402/invoices/1 --method POST --idempotency-key key-1 --headers {"X-Invoice":"1"} --body {"n":1} --session-id session_stepup --output json');
-    assert.match(execs[1], /--idempotency-key key-2 .*--use-allowance --output json$/);
+    assert.equal(execs[0], 'kpass session execute --url https://acme-billing.example/x402/invoices/1 --method POST --idempotency-key key-1 --headers {"X-Invoice":"1"} --body {"n":1} --session-id session_stepup --output json --no-interactive');
+    assert.match(execs[1], /--idempotency-key key-2 .*--use-allowance --output json --no-interactive$/);
     assert.ok(c.some((x) => /^ksearch service search Acme Billing --top 10$/.test(x)));
   });
 });

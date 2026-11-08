@@ -59,7 +59,8 @@ function cli(bin: "kpass" | "ksearch", args: string[], timeoutMs: number): Promi
   });
 }
 
-const kpass = (args: string[], timeoutMs = 30_000) => cli("kpass", [...args, "--output", "json"], timeoutMs);
+// --no-interactive: a server must fail fast rather than wait on a prompt nobody will answer.
+const kpass = (args: string[], timeoutMs = 30_000) => cli("kpass", [...args, "--output", "json", "--no-interactive"], timeoutMs);
 
 const str = (v: unknown) => (typeof v === "string" || typeof v === "number" ? String(v) : undefined);
 const num = (v: unknown) => {

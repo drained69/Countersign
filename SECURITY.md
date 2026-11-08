@@ -20,10 +20,10 @@ In scope: anything that lets a payment skip a check, pay more than once or more 
 allowance, leak keys or tokens, bypass owner sign-in or agent keys, or reach internal addresses through the price check.
 
 Out of scope: findings that need the owner's token or the host machine, the deliberately open local demo
-(no owner token, loopback only), and the limitations listed in the README's
-[Limitations and roadmap](README.md#limitations-and-roadmap) section.
+(no owner token, loopback only), and the limitations listed in the project's
+[Limitations and roadmap](docs/development.md#limitations-and-roadmap) section.
 
 ## Design
 
-The threat model and the protections in place are described in the README under
-[Security model](README.md#security-model) and [What protects the money](README.md#what-protects-the-money-in-live-mode).
+The threat model and the protections in place are described in the documentation under
+[Security model](docs/architecture.md#security-model) and [What protects the money](docs/deployment.md#what-protects-the-money-in-live-mode).

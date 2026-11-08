@@ -1,6 +1,7 @@
 // Loads configuration from the environment (and an optional .env file) with demo defaults.
 import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { resolve } from "node:path";
 import type { EngineConfig } from "./engine.ts";
 import type { Policy } from "./types.ts";
 import { normalizePayee } from "./validate.ts";
@@ -113,7 +114,8 @@ export function policyProblems(p: any): string[] {
 
 /** Loads the owner's starting policy from POLICY_FILE. */
 export function loadPolicyFile(path: string): Policy {
-  const p = JSON.parse(readFileSync(path, "utf8"));
+  // A relative POLICY_FILE means the project folder, wherever the server is started from.
+  const p = JSON.parse(readFileSync(resolve(PROJECT_ROOT, path), "utf8"));
   const errs = policyProblems(p);
   if (errs.length) throw new Error(`${path}: ${errs.join("; ")}`);
   p.knownPayees = p.knownPayees.map((k: any) => ({ payee: normalizePayee(k.payee), name: k.name }));
