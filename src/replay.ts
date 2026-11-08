@@ -26,7 +26,7 @@ export interface WeekResult {
 
 export async function runReplay(cfg: EngineConfig, weeks = 6, opts: { calibrate?: boolean } = {}): Promise<WeekResult[]> {
   // Always offline: hundreds of payments must not hit paid APIs, and runs must be reproducible.
-  const base: EngineConfig = { ...cfg, serv: { ...cfg.serv, apiKey: undefined }, reppo: { ...cfg.reppo, creditToken: undefined, sandbox: false }, kiteMode: "mock" };
+  const base: EngineConfig = { ...cfg, serv: { ...cfg.serv, apiKey: undefined }, reppo: { ...cfg.reppo, apiKey: undefined, creditToken: undefined }, kiteMode: "mock" };
   const calibrate = opts.calibrate ?? true;
   let calibration = new Calibration();
   const results: WeekResult[] = [];

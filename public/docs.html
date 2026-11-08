@@ -63,8 +63,8 @@
         <tbody>
           <tr><td>0</td><td>Code rules</td><td>Every payment</td><td>~$0</td></tr>
           <tr><td>1</td><td>SERV Reasoning</td><td>≥ $1 or a new payee</td><td>~$0.0008</td></tr>
-          <tr><td>2</td><td>Reppo Eval API</td><td>≥ $20, or a serious tier-0 flag, or SERV escalates</td><td>$0.22</td></tr>
-          <tr><td>3</td><td>You, via Kite passkey</td><td>Reppo says re-evaluate</td><td>one tap</td></tr>
+          <tr><td>2</td><td>Reppo Eval API (panel)</td><td>≥ $20, or a serious tier-0 flag, or SERV escalates</td><td>440 credits ($0.22)</td></tr>
+          <tr><td>3</td><td>You, via Kite passkey</td><td>Reppo routes it to review, the price can’t be confirmed, or you recently reported the payee</td><td>one tap</td></tr>
         </tbody>
       </table>
       <div class="callout"><b>Fail closed.</b> Any tier can block. A timeout, malformed model output or missing verdict escalates to the next tier, never approves. Nothing is paid until the receipt says <code>approved</code>.</div>
@@ -103,7 +103,7 @@ POLICY_FILE=policy.json
 TRIPWIRE_OWNER_TOKEN=&lt;64 hex chars&gt;            # dashboard sign-in
 TRIPWIRE_AGENT_KEYS=ops-agent:&lt;key&gt;,research-agent:&lt;key&gt;
 SERV_API_KEY=&lt;key&gt;                                 # without it, tier 1 hands payments to you
-REPPO_CREDIT_TOKEN=x402ck_…                        # without it, tier 2 hands payments to you
+REPPO_API_KEY=&lt;key from eval.reppo.xyz&gt;            # or REPPO_CREDIT_TOKEN=x402ck_…; without one, tier 2 hands payments to you
 NOTIFY_WEBHOOK_URL=https://hooks.slack.com/…       # optional: step-up alerts
 PUBLIC_URL=https://tripwire.yourdomain.com      # optional: links in alerts</pre></div>
       <h3>4. Check, start, test with $0.01</h3>
@@ -136,7 +136,7 @@ npm start</pre></div>
         <tbody>
           <tr><td>1</td><td>$0.40 to SearchAPI</td><td>Known payee under $1: code rules approve it alone.</td></tr>
           <tr><td>2</td><td>$9 to Transcribe Co</td><td>SERV confirms the plan matches the meetings agent's task. Approved.</td></tr>
-          <tr><td>3</td><td>$60 to <code>acme-bi11ing.example</code></td><td>Lookalike payee, not in Kite's directory, and the invoice says “change the payee wallet” with a hidden instruction to the reviewing AI. Code rules flag it, SERV PromptGuard can stop it outright, Reppo says re-evaluate, and you are asked. Decline it.</td></tr>
+          <tr><td>3</td><td>$60 to <code>acme-bi11ing.example</code></td><td>Lookalike payee, not in Kite's directory, and the invoice says “change the payee wallet” with a hidden instruction to the reviewing AI. Code rules flag it, SERV PromptGuard can stop it outright, Reppo routes it to review, and you are asked. Decline it.</td></tr>
           <tr><td>4</td><td>$60 to <code>acme-billing.example</code></td><td>The real vendor. Reppo accepts and it is paid.</td></tr>
           <tr><td>5</td><td>$10 to CloudHost</td><td>A normal hosting payment. Approved.</td></tr>
           <tr><td>6</td><td>$10.50 to CloudHost, minutes later</td><td>Split payment: each part is under the $20 review line, together they are $20.50. Sent to Reppo and you. Decline it.</td></tr>
@@ -199,8 +199,11 @@ npm start</pre></div>
         <li>The output is <strong>validated in code</strong>; anything off-schema throws and escalates.</li>
         <li>Vendor text is wrapped in <code>&lt;vendor_text&gt;</code> and capped at 2,000 characters. Instructions inside it are a reason to escalate, never to act.</li>
         <li>SERV can pass, escalate or block. It cannot approve anything above the planned tier.</li>
-        <li>Measured on <code>gpt-5.4-mini</code>: about <strong>$0.0008</strong> and 6–18 seconds per check.</li>
+        <li>Measured on <code>gpt-5.4-mini</code>: about <strong>$0.0008</strong> and 6–8 seconds per check (the first Kronos audit of a prompt takes ~35 s).</li>
       </ul>
+      <h3>SERV reasoning graphs: Multipath and Kronos</h3>
+      <p>The check runs on <code>gpt-5.4-mini-serv-kronos-multipath</code>. <strong>Multipath</strong> turns the checker's branching rules (task fit, payee, amount, manipulation, your rules) into a reasoning graph; <strong>Kronos</strong> audits that graph and repairs it before the model runs. SERV caches the audited graph per organization, so only the first call pays for the audit. <code>reasoning_effort</code> is <code>low</code>. Set <code>SERV_FEATURES=</code> for plain SERV.</p>
+      <p>Every receipt keeps SERV's <code>x-openserv-request-id</code>, the features used and the reasoning-token count, so a check can be traced in the SERV console.</p>
       <h3>SERV PromptGuard and Shadow Agent</h3>
       <p>Every live call declares SERV's two built-in tools. SERV strips them before the model sees the request:</p>
       <div class="codeblock"><div class="cb-head"><span class="label">tools</span><button class="copy">Copy</button></div><pre>"tools": [
@@ -212,31 +215,27 @@ npm start</pre></div>
       <ul>
         <li><strong>PromptGuard</strong> stops input that tries to override the checker's instructions. It answers with a refusal before the model runs, so it costs nothing. Tripwire records it as <code>promptGuard: triggered</code> and escalates.</li>
         <li><strong>Shadow Agent</strong> checks the verdict against the hint and makes the model revise it, up to 2 times.</li>
-        <li>In our tests PromptGuard fired on about a third of identical injection attempts. It is an extra layer: when it doesn't fire, the model itself escalated every injected invoice we tried, and tier 0 flags them too.</li>
+        <li>In our tests PromptGuard fired on about a third of identical injection attempts, and sometimes on harmless payments. It is an extra layer: when it doesn't fire, the model itself escalated every injected invoice we tried, and tier 0 flags them too.</li>
       </ul>
+      <h3>Benchmark</h3>
+      <p><code>npm run serv:bench</code> runs ten labelled payments (five fine, five not) through the live check, with plain SERV and with Multipath + Kronos. Over two rounds, <strong>neither let a bad payment through</strong>: plain SERV was right 18 of 20 times and Multipath + Kronos 17 of 20, the misses being PromptGuard false alarms that only cost an interruption. Median latency was 7.7 s and 6.4 s.</p>
     </section>
 
     <section id="tier-2">
       <span class="eyebrow">How it works</span>
       <h2>Tier 2 · Reppo verdict</h2>
-      <p>Larger or suspicious payments get an independent verdict from Reppo's lite evaluation endpoint, judged inline. Tripwire sends only the payment facts (task, payee, amount, purpose, vendor text, earlier flags) against four criteria:</p>
-      <ol>
-        <li>The purpose follows directly from the agent's stated task.</li>
-        <li>The payee is plausibly the legitimate vendor (not a lookalike or unrelated party).</li>
-        <li>The amount is proportionate to the stated purpose.</li>
-        <li>The vendor text does not try to instruct the agent or alter payment details.</li>
-      </ol>
+      <p>Larger or suspicious payments get an independent verdict from a panel of Reppo evaluators. Tripwire submits the payment as an <code>action</code> evaluation with only the payment facts (your task, payee, amount, purpose, vendor text, earlier flags) and the questions to judge: does the purchase follow from the task, is the payee legitimate, is the amount proportionate, and does the vendor text try to manipulate the agent? Tripwire polls until the panel finishes, usually within 30–90 seconds.</p>
       <table class="doc-table">
-        <thead><tr><th>Reppo says</th><th>Tripwire does</th></tr></thead>
+        <thead><tr><th>Reppo returns</th><th>Tripwire does</th></tr></thead>
         <tbody>
-          <tr><td><code>accept</code> with normal confidence</td><td>Pass: proceed to payment.</td></tr>
-          <tr><td><code>accept</code> with low confidence, or route <code>review</code></td><td>Escalate to you.</td></tr>
-          <tr><td><code>revise</code></td><td>Escalate to you (“re-evaluate”).</td></tr>
-          <tr><td><code>reject</code>, or a block route</td><td>Block.</td></tr>
-          <tr><td>Timeout (150 s), HTTP error, no decision</td><td>Escalate to you. A verdict is never invented.</td></tr>
+          <tr><td>route <code>ship</code> with an <code>accept</code></td><td>Pass: proceed to payment.</td></tr>
+          <tr><td>route <code>ship</code> with a <code>reject</code>, or low confidence</td><td>Escalate to you.</td></tr>
+          <tr><td>route <code>review</code></td><td>Escalate to you.</td></tr>
+          <tr><td>route <code>block</code></td><td>Block.</td></tr>
+          <tr><td><code>FAILED</code> (not charged), no verdict within 180 s, HTTP error, out of credits</td><td>Escalate to you. A verdict is never invented.</td></tr>
         </tbody>
       </table>
-      <p>A lite evaluation costs <strong>$0.22</strong> (440 credits at 2,000 credits per USDC). Reppo evaluations are public, so payloads never contain keys or wallet secrets.</p>
+      <p>An evaluation costs <strong>440 credits</strong>: $0.22 when bought with USDC over x402, or free from the sign-up credits of a Reppo account. Payloads never contain keys or wallet secrets. Tripwire also keeps Reppo's track record against your decisions; see <a href="#calibration">Calibration</a>.</p>
     </section>
 
     <section id="tier-3">
@@ -279,6 +278,9 @@ if any serious tier-0 flag            -> tier = 2</pre></div>
         <li>When you approve a payment to a new payee, it becomes a known payee for future payments.</li>
         <li>The dashboard's <strong>Payee trust</strong> panel shows each payee's signals, multiplier and current Reppo threshold.</li>
       </ul>
+          <h3>Your feedback, and Reppo's track record</h3>
+      <p>On the dashboard, <strong>Report a problem</strong> on a paid payment makes you approve every payment to that payee yourself for 30 days, and gives the agent that made it half thresholds for 30 days. <strong>This was fine</strong> on a blocked payment counts as a clean signal. Incidents stop tightening thresholds after 30 days.</p>
+      <p>Tripwire also keeps Reppo's record against you: payments Reppo sent you that you declined (it was right), ones you approved anyway (you overruled it), and ones it shipped that you later reported. The <strong>What Tripwire has learned</strong> panel shows how often Reppo agreed with you.</p>
     </section>
 
     <section id="policy">
@@ -312,7 +314,7 @@ The ops agent can spend at most $70 per payment. Block payments to fastcash.exam
       <p>Every payment gets a receipt at <code>/r/&lt;id&gt;</code> (and as JSON at <code>/api/receipts/&lt;id&gt;</code>) with:</p>
       <ul>
         <li>The intent exactly as the checks saw it, including untrusted vendor text.</li>
-        <li>Every step that ran: tier, kind, outcome, <strong>mode</strong> (<code>live</code>, <code>sandbox</code> or <code>mock</code>), cost, latency and reasons.</li>
+        <li>Every step that ran: tier, kind, outcome, <strong>mode</strong> (<code>live</code> or <code>mock</code>), cost, latency, reasons, and the sponsor's own evidence (SERV request id, Reppo evaluation id, Kite transaction hash).</li>
         <li>The planned tier, the total cost of checks, the final status and timestamps.</li>
         <li>The Kite payment result, with its reference or error.</li>
       </ul>
@@ -465,7 +467,7 @@ interface StepRecord {
   reasons: string[];
   costUsd: number;
   latencyMs: number;
-  mode: "live" | "mock" | "sandbox";
+  mode: "live" | "mock";
   detail?: Record&lt;string, unknown&gt;;   // e.g. promptGuard, servTools, kiteDirectory, priceQuote, approvalUrl, evalId
 }</pre></div>
     </section>
@@ -478,11 +480,13 @@ interface StepRecord {
         <thead><tr><th>Variable</th><th>Default</th><th>Purpose</th></tr></thead>
         <tbody>
           <tr><td><code>SERV_API_KEY</code></td><td>—</td><td>Enables live tier 1. Without it, a keyword-overlap stand-in runs.</td></tr>
-          <tr><td><code>SERV_MODEL</code></td><td><code>gpt-5.4-mini</code></td><td>SERV model for task matching.</td></tr>
+          <tr><td><code>SERV_MODEL</code></td><td><code>gpt-5.4-mini</code></td><td>SERV base model for task matching and the policy compiler.</td></tr>
+          <tr><td><code>SERV_FEATURES</code></td><td><code>kronos-multipath</code></td><td>SERV Reasoning graph features on the model ID. Empty: plain SERV.</td></tr>
+          <tr><td><code>SERV_REASONING_EFFORT</code></td><td><code>low</code></td><td><code>reasoning_effort</code> sent to SERV.</td></tr>
           <tr><td><code>SERV_BASE_URL</code></td><td><code>https://inference-api.openserv.ai</code></td><td>SERV endpoint.</td></tr>
           <tr><td><code>SERV_PRICE_IN</code> / <code>SERV_PRICE_OUT</code></td><td>0.75 / 4.5</td><td>USD per million tokens, for receipt costs.</td></tr>
-          <tr><td><code>REPPO_CREDIT_TOKEN</code></td><td>—</td><td>Credit token (<code>x402ck_…</code>) for paid lite evaluations.</td></tr>
-          <tr><td><code>REPPO_SANDBOX</code></td><td><code>false</code></td><td>Free placeholder verdicts from the real API. Always “revise”.</td></tr>
+          <tr><td><code>REPPO_API_KEY</code></td><td>—</td><td>API key from eval.reppo.xyz (free sign-up credits). Takes precedence over a credit token.</td></tr>
+          <tr><td><code>REPPO_CREDIT_TOKEN</code></td><td>—</td><td>Credit token (<code>x402ck_…</code>) bought with USDC on Base over x402.</td></tr>
           <tr><td><code>REPPO_BASE_URL</code></td><td><code>https://eval.reppo.xyz</code></td><td>Reppo endpoint.</td></tr>
           <tr><td><code>KITE_MODE</code></td><td><code>mock</code></td><td><code>kpass</code> for real payments and passkey step-ups. Needs kpass 6.8.9+, signed in. See <a href="#live">Going live</a>.</td></tr>
           <tr><td><code>KITE_PAY_FROM</code> / <code>KITE_SESSION_ID</code></td><td><code>allowance</code> / —</td><td>Pay from the Kite account allowance, or from one named session.</td></tr>
@@ -504,19 +508,19 @@ interface StepRecord {
       <span class="eyebrow">Reference</span>
       <h2>Integrations</h2>
       <h3>SERV Reasoning</h3>
-      <p><code>POST /v1/chat/completions</code> with <code>response_format.json_schema</code> in strict mode, plus the <code>serv_prompt_guard</code> and <code>serv_shadow_agent</code> tools. <strong>Verified live</strong>: it passes purchases that match the task, escalates vendor text that tries to change payment details, and blocks off-task purchases. PromptGuard was seen firing live on injected invoices, and the policy compiler runs on SERV too.</p>
+      <p><code>POST /v1/chat/completions</code> on <code>gpt-5.4-mini-serv-kronos-multipath</code> with <code>response_format.json_schema</code> in strict mode, <code>reasoning_effort</code>, and the <code>serv_prompt_guard</code> and <code>serv_shadow_agent</code> tools. <strong>Verified live and benchmarked</strong>: it passes purchases that match the task, escalates vendor text that tries to change payment details, and escalates off-task purchases. Each receipt keeps SERV's request id.</p>
       <h3>Reppo</h3>
-      <p><code>POST /api/v1/x402/evals/lite</code> with <code>{ type: "plan", payload, criteria, context }</code>, authenticated by a credit token or the <code>Sandbox: true</code> header. <strong>Verified live in sandbox</strong>, including the response shape <code>result.verdict</code>, <code>verdicts[]</code> and <code>action.route</code>. Each evaluation takes about 4 seconds.</p>
+      <p><code>POST /api/v1/agents/evals</code> (API key) or <code>/api/v1/x402/evals</code> (credit token) with <code>{ taskType: "action", input }</code>, then polling until <code>COMPLETED</code>. The panel's <code>result.route</code> (<code>ship</code>, <code>review</code>, <code>block</code>), score, confidence and rubric go on the receipt. <strong>Built and tested to Reppo's current API</strong>; a live verdict needs a key or credit token.</p>
       <h3>Kite Agent Passport</h3>
       <p>Kite has no public HTTP API; agents use the <code>kpass</code> and <code>ksearch</code> CLIs, always with <code>--output json</code> and never through a shell. Tripwire follows the command reference in Kite's official <a href="https://github.com/gokite-ai/passport-skills">passport-skills</a> (kpass 6.8.9+).</p>
       <ul>
         <li><strong>Payments:</strong> <code>session execute --url --method --idempotency-key [--headers] [--body]</code> with <code>--use-allowance</code>, or <code>--session-id</code> for a step-up session.</li>
         <li><strong>Step-up:</strong> <code>session create --separate</code> with a delegation capped at one payment, then <code>session status --request-id --wait</code> for your passkey answer.</li>
-        <li><strong>Outcomes:</strong> success; exit 6 (allowance, balance or caps: nothing paid); exit 7 pending or held (counted, rechecked with the same key, or with <code>session updates</code> for held payments); exit 1 bridge or swap failures (treated as possibly paid). A timeout or unreadable reply is never treated as unpaid.</li>
+        <li><strong>Outcomes:</strong> success; exit 6 (allowance, balance or caps: nothing paid); exit 7 pending or held (counted, then settled from <code>kpass activity</code> or retried with the same key); exit 1 bridge or swap failures (treated as possibly paid). A timeout or unreadable reply is never treated as unpaid.</li>
         <li><strong>Directory check:</strong> <code>ksearch service search &lt;payee name&gt;</code>, matched on the payee's domain.</li>
-        <li><strong>Receipts</strong> show Kite's payment id, amount, the merchant's HTTP status and Kite's own message. Tripwire never builds explorer URLs.</li>
+        <li><strong>Receipts</strong> show the amount, the merchant's HTTP status, Kite's own message, and the transaction hash and chain read from <code>kpass activity</code>. Tripwire never builds explorer URLs.</li>
       </ul>
-      <p>This path is tested against a simulated kpass that answers with Kite's documented replies, including the full live server flow. It has <strong>not yet moved real money</strong>: run <code>npm run doctor</code>, then a $0.01 payment. Offline, a stand-in directory lists the legitimate demo vendors.</p>
+      <p><strong>Real payment made:</strong> $0.001 to <code>agent402.tools</code> from the account allowance on Base, transaction <code>0xdba0dc8573fbddcdd0b6d2ff5e8c936f84372afa277b510dbd99a33432dfbb20</code>. The passkey step-up is tested against a simulated kpass that answers with Kite's documented replies. Offline, a stand-in directory lists the legitimate demo vendors.</p>
     </section>
 
     <section id="security">
@@ -549,10 +553,10 @@ interface StepRecord {
       <span class="eyebrow">More</span>
       <h2>Limitations</h2>
       <ul>
-        <li>The Kite path follows Kite's published reference and is tested against a simulator, but hasn't moved real money yet. Do a $0.01 payment first.</li>
+        <li>A real Kite payment has gone through, but the passkey step-up has only run against a simulated kpass.</li>
         <li>Merchant prices are read from the standard x402 <code>accepts</code> list and common price fields; a merchant that hides its price gets your passkey step-up, never a blind payment.</li>
         <li>SERV adds 6–18 seconds per check, which is noticeable for small, frequent payments.</li>
-        <li>Reppo's sandbox always answers “revise”, so under sandbox every tier-2 payment goes to a human.</li>
+        <li>Reppo needs an API key or credits, and its panel takes 30–90 seconds per evaluation.</li>
         <li>One owner per deployment: each server protects one Kite account and one policy, with state in a JSON file.</li>
         <li>Tripwire can't stop an agent that also holds its own Kite login. Give agents only their Tripwire key.</li>
         <li>Lookalike and injection detection are heuristics. They are a first filter; SERV and Reppo are the backstop.</li>

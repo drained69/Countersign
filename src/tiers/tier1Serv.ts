@@ -3,6 +3,9 @@
 // Without SERV_API_KEY it falls back to a keyword-overlap stand-in, labelled "mock" on the receipt.
 // Every live call enables two SERV tools: PromptGuard (stops input that tries to override the checker's
 // instructions, before the model runs) and a Shadow Agent (validates the verdict and makes the model revise).
+// It also runs SERV Reasoning's graph features through the model ID (docs.openserv.ai/serv-reasoning):
+// Multipath turns the checker's branching rules into a reasoning graph, and Kronos audits and repairs that
+// graph before inference. SERV caches the generated graph per organization, so only the first call pays for it.
 import type { PaymentIntent, StepRecord } from "../types.ts";
 
 /** Measured live cost of one task-match call (gpt-5.4-mini, Nov 2026). */
@@ -42,8 +45,12 @@ export interface ServConfig {
   /** USD per 1M input / output tokens, for the receipt's cost line. */
   priceIn: number;
   priceOut: number;
-  /** Per-call timeout. Default 60 s. A timeout escalates the payment. */
+  /** Per-call timeout. Default 90 s (a first Kronos audit takes ~35 s). A timeout escalates the payment. */
   timeoutMs?: number;
+  /** SERV Reasoning features appended to the model ID, e.g. "kronos-multipath". Empty: plain SERV. */
+  features?: string;
+  /** reasoning_effort for reasoning-capable models: low | medium | high. */
+  reasoningEffort?: string;
 }
 
 export const SERV_SYSTEM_PROMPT = `You are the task-match checker inside Tripwire, a co-signer for AI agent payments.
@@ -129,6 +136,23 @@ export function mockTaskMatch(intent: PaymentIntent): TaskMatch {
   };
 }
 
+/** The model ID SERV receives: the base model plus any SERV Reasoning feature suffix. */
+export function servModel(cfg: Pick<ServConfig, "model" | "features">): string {
+  const f = (cfg.features ?? "").trim().replace(/^-?serv-/, "");
+  return f ? `${cfg.model}-serv-${f}` : cfg.model;
+}
+
+/** Human names of the SERV features a call used, for receipts. */
+export function servFeatures(cfg: Pick<ServConfig, "features">, tools: string[] = SERV_TOOLS.map((t) => t.function.name)): string[] {
+  const f = cfg.features ?? "";
+  return [
+    ...(/multipath/.test(f) ? ["Multipath"] : []),
+    ...(/kronos/.test(f) ? ["Kronos"] : []),
+    ...(tools.includes("serv_prompt_guard") ? ["PromptGuard"] : []),
+    ...(tools.includes("serv_shadow_agent") ? ["Shadow Agent"] : []),
+  ];
+}
+
 export async function runTier1(intent: PaymentIntent, cfg: ServConfig): Promise<StepRecord> {
   const started = Date.now();
   if (!cfg.apiKey) {
@@ -143,10 +167,11 @@ export async function runTier1(intent: PaymentIntent, cfg: ServConfig): Promise<
     const res = await fetch(`${cfg.baseUrl}/v1/chat/completions`, {
       method: "POST",
       headers: { Authorization: `Bearer ${cfg.apiKey}`, "Content-Type": "application/json" },
-      // Measured live latency is 6-18 s; a hung call must escalate, not hold the payment forever.
-      signal: AbortSignal.timeout(cfg.timeoutMs ?? 60_000),
+      // Measured live latency is 6-18 s, ~35 s when Kronos first audits a graph; a hung call must escalate.
+      signal: AbortSignal.timeout(cfg.timeoutMs ?? 90_000),
       body: JSON.stringify({
-        model: cfg.model,
+        model: servModel(cfg),
+        ...(cfg.reasoningEffort ? { reasoning_effort: cfg.reasoningEffort } : {}),
         messages: [
           { role: "system", content: SERV_SYSTEM_PROMPT },
           { role: "user", content: buildUserPrompt(intent) },
@@ -159,15 +184,29 @@ export async function runTier1(intent: PaymentIntent, cfg: ServConfig): Promise<
     const body: any = await res.json();
     const message = body.choices?.[0]?.message ?? {};
     const tools = SERV_TOOLS.map((t) => t.function.name);
+    // SERV's request id traces this exact call in the SERV console (Usage, Safety and Shadow Agent reports).
+    const evidence = {
+      servRequestId: res.headers.get("x-openserv-request-id") ?? undefined,
+      servFeatures: servFeatures(cfg, tools),
+      model: servModel(cfg),
+      upstreamModel: body.model,
+      reasoningEffort: cfg.reasoningEffort,
+    };
     // PromptGuard answers with a refusal and no content, before the model runs (0 tokens billed).
     if (!message.content && message.refusal) {
-      return guardStep(started, "live", { promptGuard: "triggered", refusal: String(message.refusal).slice(0, 200), servTools: tools, model: cfg.model });
+      return guardStep(started, "live", { promptGuard: "triggered", refusal: String(message.refusal).slice(0, 200), servTools: tools, ...evidence });
     }
     const parsed = parseTaskMatch(message.content ?? "");
     const usage = body.usage ?? {};
     const cost =
       ((usage.prompt_tokens ?? 0) * cfg.priceIn + (usage.completion_tokens ?? 0) * cfg.priceOut) / 1_000_000;
-    return toStep(parsed, cost, Date.now() - started, "live", { model: cfg.model, usage, promptGuard: "clear", servTools: tools });
+    return toStep(parsed, cost, Date.now() - started, "live", {
+      ...evidence,
+      usage,
+      reasoningTokens: usage.completion_tokens_details?.reasoning_tokens,
+      promptGuard: "clear",
+      servTools: tools,
+    });
   } catch (err) {
     // A failed check never approves: escalate to the next tier.
     return {

@@ -147,14 +147,51 @@ export async function executePayment(
   else if (kite.payFrom === "session" && kite.sessionId) args.push("--session-id", kite.sessionId);
   else args.push("--use-allowance");
 
+  const startedAt = new Date().toISOString();
   let r: CliResult;
   try {
     // Kite documents up to 5 minutes for cross-chain settlement.
     r = await kpass(args, 330_000);
   } catch (err) {
-    return { executed: false, state: "not_paid", mode: "live", idempotencyKey, error: (err as Error).message };
+    return { executed: false, state: "not_paid", mode: "live", idempotencyKey, startedAt, error: (err as Error).message };
   }
-  return { ...classifyExecute(r), mode: "live", idempotencyKey, sessionId: opts.sessionId };
+  const result: PaymentResult = { ...classifyExecute(r), mode: "live", idempotencyKey, startedAt, sessionId: opts.sessionId };
+  // Kite's execute reply carries no transaction hash; its activity log does.
+  if (result.state === "paid" && !result.txHash) {
+    const a = await findPaymentActivity(intent, startedAt).catch(() => undefined);
+    if (a?.txHash) Object.assign(result, { txHash: a.txHash, chainId: a.chainId });
+  }
+  return result;
+}
+
+export interface PaymentActivity {
+  status: string;
+  txHash?: string;
+  chainId?: number;
+  amountUsd?: number;
+}
+
+/**
+ * Finds this payment in Kite's activity log (`kpass activity --kind x402_payment`): the most recent
+ * x402 payment to the same URL since the attempt started. Read-only.
+ */
+export async function findPaymentActivity(intent: PaymentIntent, since: string): Promise<PaymentActivity | undefined> {
+  if (!intent.url) return undefined;
+  const r = await kpass(["activity", "--kind", "x402_payment", "--limit", "50"], 20_000);
+  if (r.code !== 0) return undefined;
+  const from = Date.parse(since) - 60_000; // clock skew between this machine and Kite
+  const hit = (r.out?.events ?? [])
+    .filter((e: any) => e?.details?.transaction?.x402?.request_url === intent.url && Date.parse(e.occurred_at ?? e.created_at) >= from)
+    .sort((a: any, b: any) => Date.parse(b.occurred_at) - Date.parse(a.occurred_at))[0];
+  if (!hit) return undefined;
+  const t = hit.details.transaction;
+  const raw = num(t.amount_raw), decimals = num(t.decimals);
+  return {
+    status: String(hit.status ?? "").toLowerCase(),
+    txHash: str(t.tx_hash),
+    chainId: num(t.chain_id),
+    amountUsd: raw !== undefined && decimals !== undefined ? raw / 10 ** decimals : undefined,
+  };
 }
 
 /** Errors Kite documents as "nothing moved". Everything else that fails is treated as possibly paid. */
@@ -211,19 +248,20 @@ export function classifyExecute(r: CliResult): Omit<PaymentResult, "mode"> {
  * idempotency key, which never pays twice. Held: ask Kite for the merchant's final result.
  */
 export async function recheckPayment(intent: PaymentIntent, previous: PaymentResult, kite: KiteOptions = DEFAULT_KITE): Promise<PaymentResult> {
-  if (previous.state === "held" && previous.paymentId) {
-    let r: CliResult;
-    try {
-      r = await kpass(["session", "updates", "--wait", "--payment-id", previous.paymentId], 90_000);
-    } catch (err) {
-      return { ...previous, error: (err as Error).message };
-    }
-    const update = (r.out?.updates ?? []).find((u: any) => u.payment_id === previous.paymentId) ?? r.out?.updates?.[0];
-    if (r.code === 0 && update?.outcome === "charged") return { ...previous, executed: true, state: "paid", txHash: str(update.tx_hash), userMessage: str(update.user_message), error: undefined };
-    if (r.code === 0 && update?.outcome === "not_charged_released") return { ...previous, executed: false, state: "not_paid", userMessage: str(update.user_message), error: "Merchant failed; Kite released the hold and charged nothing." };
-    return { ...previous, userMessage: str(r.out?.user_message) ?? previous.userMessage };
+  if (previous.state !== "unknown" && previous.state !== "held") return previous;
+  // Kite's own record first: read-only, and it settles the question without sending anything.
+  const a = await findPaymentActivity(intent, previous.startedAt ?? intent.createdAt).catch(() => undefined);
+  if (a?.status === "completed") {
+    return { ...previous, executed: true, state: "paid", txHash: a.txHash ?? previous.txHash, chainId: a.chainId, amountUsd: a.amountUsd ?? previous.amountUsd, error: undefined };
   }
-  if (previous.state !== "unknown" || !previous.idempotencyKey) return previous;
+  if (a && /fail|refund|releas|cancel|revers/.test(a.status)) {
+    return { ...previous, executed: false, state: "not_paid", error: `Kite's activity log shows this payment as ${a.status}; nothing is counted.` };
+  }
+  // Held money waits for the merchant's result: never send it again. Check later, or settle by hand.
+  if (previous.state === "held" || !previous.idempotencyKey) {
+    return { ...previous, error: `${a ? `Kite's activity log shows it as ${a.status}. ` : "Not in Kite's activity log yet. "}Check again later, or resolve it after checking Kite's Activity page.` };
+  }
+  // Unknown and not in the log: Kite's documented retry with the SAME key, which never charges twice.
   return executePayment(intent, "kpass", { idempotencyKey: previous.idempotencyKey, sessionId: previous.sessionId, kite });
 }
 

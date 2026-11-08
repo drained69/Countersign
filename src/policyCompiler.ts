@@ -1,7 +1,7 @@
 // Plain-English policy -> structured policy change, compiled by SERV with a strict JSON schema.
 // SERV only proposes. Code validates every field (ranges, known agents, payee format) and the owner
 // reviews the exact diff before anything is applied. Anything SERV can't express goes in `unsupported`.
-import { SERV_TOOLS, type ServConfig } from "./tiers/tier1Serv.ts";
+import { SERV_TOOLS, servModel, type ServConfig } from "./tiers/tier1Serv.ts";
 import type { AgentRule, Policy } from "./types.ts";
 
 export interface PolicyProposal {
@@ -233,9 +233,12 @@ export async function compilePolicy(text: string, current: Policy, agents: { id:
   const res = await fetch(`${serv.baseUrl}/v1/chat/completions`, {
     method: "POST",
     headers: { Authorization: `Bearer ${serv.apiKey}`, "Content-Type": "application/json" },
-    signal: AbortSignal.timeout(60_000),
+    // A first Kronos audit of the compiler prompt takes ~35 s; later calls reuse SERV's cached graph.
+    signal: AbortSignal.timeout(120_000),
     body: JSON.stringify({
-      model: serv.model,
+      // A spending policy is a branching rule set: Multipath and Kronos are built for exactly that.
+      model: servModel(serv),
+      ...(serv.reasoningEffort ? { reasoning_effort: serv.reasoningEffort } : {}),
       messages: [
         { role: "system", content: COMPILER_PROMPT },
         {
@@ -258,5 +261,5 @@ export async function compilePolicy(text: string, current: Policy, agents: { id:
   const merged = applyProposal(JSON.parse(msg.content), current, agentIds, text);
   const u = body.usage ?? {};
   const costUsd = ((u.prompt_tokens ?? 0) * serv.priceIn + (u.completion_tokens ?? 0) * serv.priceOut) / 1_000_000;
-  return { ...merged, mode: "live", costUsd, latencyMs: Date.now() - started, model: serv.model };
+  return { ...merged, mode: "live", costUsd, latencyMs: Date.now() - started, model: servModel(serv) };
 }

@@ -54,8 +54,8 @@ Built for the **OpenServ SERV Hackathon, Edition 02 (Kite track)**.
 - **Attack detection**: lookalike payees, prompt injection in vendor text, duplicate and split payments, unusual amounts, and payees missing from Kite's service directory.
 - **Never pays twice**: idempotency keys are saved before money moves, and unconfirmed outcomes stay counted until rechecked.
 - **Plain-English policy**: write rules like *"Never pay more than $25 to a new vendor"*. SERV compiles them, code validates them, and you approve the exact diff.
-- **Per-payee calibration**: trusted payees earn fewer interruptions; any incident makes a payee stricter than the default.
-- **Receipts for every decision**: a timeline of each check, its cost, latency and whether it ran `live`, `sandbox` or `mock`.
+- **Learns from you and Reppo**: trusted payees earn fewer interruptions; report a paid payment as a problem and you approve that payee for 30 days while its agent gets stricter checks; Reppo's agreement with your decisions is tracked on the dashboard.
+- **Receipts for every decision**: a timeline of each check, its cost, latency, whether it ran `live` or `mock`, and the sponsors' own evidence: SERV request ids, Reppo evaluation ids, Kite transaction hashes.
 - **Agent-ready**: a dependency-free MCP server (`tripwire_pay`, `tripwire_receipt`, `tripwire_policy`) and a JSON HTTP API.
 - **Live dashboard**: decisions in real time, allowance and cost metrics, payee trust, policy editor and replay chart, in light and dark themes.
 - **Zero runtime dependencies**: TypeScript in strict mode, run directly by Node with no build step.
@@ -73,7 +73,7 @@ flowchart LR
     T1 -- escalate or ≥ $20 --> T2{Tier 2<br/>Reppo verdict}
     T2 -- reject --> X
     T2 -- accept --> OK
-    T2 -- revise / low confidence --> T3{Tier 3<br/>Kite passkey}
+    T2 -- review / low confidence --> T3{Tier 3<br/>Kite passkey}
     T3 -- approve --> OK
     T3 -- decline / timeout --> X
 ```
@@ -81,9 +81,9 @@ flowchart LR
 | Tier | Runs when | Checks | Cost |
 |---|---|---|---|
 | **0 · Code rules** | Every payment | Caps, allow/deny lists, your rules, lookalikes, duplicates, splits, unusual amounts, injected instructions, Kite directory | ~$0 |
-| **1 · SERV reasoning** | ≥ $1 or a new payee | Does the purchase follow from the agent's task? (PromptGuard + Shadow Agent) | ~$0.0008 |
-| **2 · Reppo verdict** | ≥ $20, a serious flag, or SERV escalates | Purpose, payee legitimacy, proportionate amount, manipulation | $0.22 |
-| **3 · Kite passkey** | Reppo asks for re-evaluation | The owner approves a one-shot session capped at this exact payment | one tap |
+| **1 · SERV reasoning** | ≥ $1 or a new payee | Does the purchase follow from the agent's task? (SERV Multipath + Kronos reasoning graph, PromptGuard, Shadow Agent) | ~$0.0008 |
+| **2 · Reppo verdict** | ≥ $20, a serious flag, or SERV escalates | A panel of independent evaluators scores the payment and routes it ship / review / block | 440 credits ($0.22) |
+| **3 · Kite passkey** | Reppo routes it to review, or the price can't be confirmed | The owner approves a one-shot session capped at this exact payment | one tap |
 
 Full details on routing, each tier and calibration: **[docs/how-it-works.md](docs/how-it-works.md)**.
 
@@ -177,7 +177,7 @@ cp .env.example .env
 | Variable | Default | Description |
 |---|---|---|
 | `SERV_API_KEY` | — | Enables live SERV checks (tier 1) and the live policy compiler |
-| `REPPO_CREDIT_TOKEN` | — | Enables paid Reppo verdicts (tier 2) |
+| `REPPO_API_KEY` or `REPPO_CREDIT_TOKEN` | — | Enables live Reppo verdicts (tier 2). An API key from eval.reppo.xyz comes with free sign-up credits |
 | `KITE_MODE` | `mock` | Set to `kpass` for real payments through Kite |
 | `TRIPWIRE_OWNER_TOKEN` | — | Dashboard sign-in; required in live mode or off localhost |
 | `TRIPWIRE_AGENT_KEYS` | — | `agentId:key,…`; required in live mode |
@@ -190,9 +190,9 @@ The full list, and the step-by-step guide to real payments, are in **[docs/deplo
 
 | Sponsor | Used for | Status |
 |---|---|---|
-| **OpenServ SERV** | Tier 1 reasoning with strict JSON schema, **PromptGuard** and **Shadow Agent**; the plain-English policy compiler | ✅ Verified live |
-| **Reppo** | Tier 2 network verdict via the lite Eval API (accept / revise / reject) | ✅ Verified in sandbox |
-| **Kite** | Payments with `kpass session execute` and idempotency keys; passkey step-up sessions; `ksearch` service directory | 🟡 Built to Kite's published CLI reference and tested against a simulator; awaiting a first real payment |
+| **OpenServ SERV** | Tier 1 reasoning through SERV's graph features (**Multipath**, audited by **Kronos**), strict JSON schema, **PromptGuard**, **Shadow Agent**, reasoning effort; the plain-English policy compiler; a benchmark (`npm run serv:bench`) | ✅ Verified live, benchmarked |
+| **Reppo** | Tier 2 panel evaluation (`/api/v1/agents/evals` or `/api/v1/x402/evals`): score 0–100, route ship / review / block; its track record against the owner feeds the dashboard | 🟡 Built and tested to Reppo's current API; live once a key or credit token is set |
+| **Kite** | Payments with `kpass session execute` and idempotency keys; passkey step-up sessions; `ksearch` service catalog; transaction hashes from `kpass activity` | ✅ Real payment made: $0.001 on Base, tx `0xdba0dc85…dfbb20` |
 
 Evidence for each: [docs/architecture.md](docs/architecture.md#integration-status).
 
@@ -208,6 +208,17 @@ A six-week replay of seeded traffic (46 payments a week across three agents, 5 o
 | Cost of checks at live prices | **$21.74** | $22.40 |
 
 Reproduce with `npm run replay`. The replay uses offline stand-ins for SERV and Reppo, so it measures the ladder's routing and calibration, not the reviewers' judgement. [More on the methodology](docs/how-it-works.md#results).
+
+**Live SERV benchmark.** Ten labelled payments (five fine, five not: off-task purchases, an injected invoice, changed payment details), each run twice through the live tier-1 check:
+
+| SERV setting | Correct | Bad payments let through | Good payments sent to the owner | Median latency | Cost (20 checks) |
+|---|---|---|---|---|---|
+| Plain SERV | 18 / 20 | **0** | 2 | 7.7 s | $0.018 |
+| SERV Multipath + Kronos (default) | 17 / 20 | **0** | 3 | 6.4 s | $0.017 |
+
+Neither setting let a bad payment through. The false alarms come from PromptGuard, which fires inconsistently on harmless payments; that costs an owner interruption, never money. Reproduce with `npm run serv:bench` (a few cents of SERV credit).
+
+**Real money.** Tripwire's first live payment: $0.001 to `agent402.tools`, a service in Kite's catalog. The code rules confirmed the merchant's x402 price and its catalog listing, SERV passed it, and Kite paid from the account allowance on Base. The merchant answered HTTP 200, and Kite's activity log records the transaction `0xdba0dc8573fbddcdd0b6d2ff5e8c936f84372afa277b510dbd99a33432dfbb20`.
 
 ## Project structure
 
@@ -238,7 +249,7 @@ npm install
 npm run check
 ```
 
-38 tests cover every tier, routing, calibration, the Kite adapter (against a simulated `kpass` covering each documented outcome), the price check, authentication, concurrent payments, fail-closed error handling, and the real HTTP server end to end. Tests make no network calls. CI runs them on Node 24 and 25 for every push. See [docs/development.md](docs/development.md).
+41 tests cover every tier, routing, calibration and the feedback loop, the Kite adapter (against a simulated `kpass` covering each documented outcome, including Kite's activity log), Reppo's submit-and-poll API (against a local stub), SERV's model features, the price check, authentication, concurrent payments, fail-closed error handling, and the real HTTP server end to end. Tests make no network calls. CI runs them on Node 24 and 25 for every push. See [docs/development.md](docs/development.md).
 
 ## Documentation
 
@@ -255,11 +266,11 @@ The running server also serves documentation at `/docs`.
 ## Roadmap
 
 - [x] Four-tier verification ladder with receipts
-- [x] SERV reasoning with PromptGuard and Shadow Agent
-- [x] Reppo network verdicts
-- [x] Kite payments, passkey step-up and directory checks (simulator-tested)
-- [x] Plain-English policy, calibration, MCP server, dashboard
-- [ ] First real Kite payment to confirm live replies match the reference
+- [x] SERV reasoning with Multipath, Kronos, PromptGuard and Shadow Agent, and a benchmark
+- [x] Reppo panel verdicts on the current API, with a track record against the owner
+- [x] Kite payments, passkey step-up and directory checks, with a first real payment on Base
+- [x] Plain-English policy, calibration and owner feedback, MCP server, dashboard
+- [ ] A live passkey step-up and a live Reppo verdict on the same real payment
 - [ ] Cache verdicts for repeat (payee, purpose) pairs to cut latency
 - [ ] Multiple owners, roles and a database backend
 

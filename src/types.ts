@@ -62,6 +62,8 @@ export interface Receipt {
   plannedTier: 0 | 1 | 2 | 3;
   payment?: PaymentResult;
   decidedAt?: string;
+  /** The owner's verdict after the fact: a paid payment that was a problem, or a block that was wrong. */
+  feedback?: { rating: "good" | "bad"; note?: string; at: string };
 }
 
 export interface Policy {
@@ -105,6 +107,10 @@ export interface PaymentResult {
   idempotencyKey?: string;
   /** Amount Kite reports it paid, when it says. */
   amountUsd?: number;
+  /** When the payment was sent to Kite; rechecks look in Kite's activity log from here. */
+  startedAt?: string;
+  /** Chain the payment settled on (EVM chain id), from Kite's activity log. */
+  chainId?: number;
   /** HTTP status the merchant answered with after payment. */
   merchantStatus?: number;
   paymentId?: string;

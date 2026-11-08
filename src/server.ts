@@ -31,6 +31,10 @@ const LIVE = cfg.kiteMode === "kpass";
 // Live and demo never share state: demo receipts are not real payments.
 const STATE_FILE = process.env.STATE_FILE ?? join(ROOT, "data", LIVE ? "live-state.json" : "state.json");
 const loopback = /^(127\.\d+\.\d+\.\d+|::1|localhost)$/.test(host);
+/** PUBLIC_DEMO=true: anyone can use the demo dashboard (never in live mode; costly calls are rate-limited). */
+const PUBLIC_DEMO = process.env.PUBLIC_DEMO === "true";
+/** TRUST_PROXY=true: take the client address from the proxy (Railway, Fly, nginx) for rate limits. */
+const TRUST_PROXY = process.env.TRUST_PROXY === "true";
 
 function fail(msg: string): never {
   console.error(`\nTripwire can't start: ${msg}\n`);
@@ -43,7 +47,8 @@ try {
 } catch (err) {
   fail((err as Error).message);
 }
-if (!auth.ownerToken && (LIVE || !loopback)) {
+if (PUBLIC_DEMO && LIVE) fail("PUBLIC_DEMO=true is only for the demo: it opens the dashboard to anyone, which must never control real money.");
+if (!auth.ownerToken && (LIVE || (!loopback && !PUBLIC_DEMO))) {
   fail(`${LIVE ? "KITE_MODE=kpass moves real money" : `HOST=${host} is reachable beyond this machine`}, so set TRIPWIRE_OWNER_TOKEN (24+ random characters, e.g. \`openssl rand -hex 24\`).`);
 }
 if (LIVE && !auth.agentKeys.size) fail("Live mode needs at least one agent key: TRIPWIRE_AGENT_KEYS=agent-id:key (24+ characters each).");
@@ -54,6 +59,8 @@ const agentList = () =>
   auth.agentKeys.size ? [...new Set(auth.agentKeys.values())].map((id) => ({ id, task: "" })) : Object.values(AGENTS);
 
 function startingPolicy(): Policy {
+  // The scripted demo always runs on the demo policy, so a live POLICY_FILE in .env can't break it.
+  if (!LIVE) return structuredClone(DEMO_POLICY);
   if (process.env.POLICY_FILE) {
     try {
       return loadPolicyFile(process.env.POLICY_FILE);
@@ -153,7 +160,7 @@ function state() {
     spentUsd: engine.spentUsd(),
     demoRemaining: demoQueue.length,
     receipts: [...engine.receipts.values()].sort((a, b) => b.intent.createdAt.localeCompare(a.intent.createdAt)),
-    calibration: engine.calibration.toJSON(),
+    calibration: engine.calibration.view(),
     agents: agentList(),
   };
 }
@@ -217,9 +224,27 @@ function serveStatic(res: ServerResponse, path: string) {
   res.end(readFileSync(file));
 }
 
-const clientIp = (req: IncomingMessage) => req.socket.remoteAddress ?? "?";
+const clientIp = (req: IncomingMessage) => {
+  if (TRUST_PROXY) {
+    const real = req.headers["x-real-ip"];
+    if (typeof real === "string" && real) return real.trim();
+    const fwd = req.headers["x-forwarded-for"];
+    const last = (Array.isArray(fwd) ? fwd.join(",") : fwd ?? "").split(",").map((x) => x.trim()).filter(Boolean).at(-1);
+    if (last) return last;
+  }
+  return req.socket.remoteAddress ?? "?";
+};
+/** Public demo: calls that spend SERV or Reppo credit, per visitor address. */
+const costlyLimiter = new LoginLimiter(Number(process.env.PUBLIC_RATE_LIMIT ?? 40), 60 * 60_000);
+const COSTLY = new Set(["/api/intents", "/api/demo/next", "/api/policy/compile"]);
 const cookieFlags = (req: IncomingMessage) =>
   `HttpOnly; SameSite=Strict; Path=/; Max-Age=${30 * 24 * 3600}${process.env.COOKIE_SECURE === "true" || req.headers["x-forwarded-proto"] === "https" || PUBLIC_URL.startsWith("https:") ? "; Secure" : ""}`;
+
+/** Who is calling. In the public demo every visitor gets the demo owner's view (no real money exists there). */
+const caller = (req: IncomingMessage): Caller => {
+  const who = identify(req, auth);
+  return PUBLIC_DEMO && who.role === "anon" ? { role: "owner" } : who;
+};
 
 const server = createServer(async (req, res) => {
   const url = new URL(req.url ?? "/", "http://localhost");
@@ -228,11 +253,11 @@ const server = createServer(async (req, res) => {
   try {
     // ---------- Public: pages, login ----------
     if (method === "GET" && path === "/api/session") {
-      const who = identify(req, auth);
-      return json(res, 200, { authRequired: Boolean(auth.ownerToken), role: who.role, live: LIVE });
+      const who = caller(req);
+      return json(res, 200, { authRequired: Boolean(auth.ownerToken) && !PUBLIC_DEMO, role: who.role, live: LIVE, publicDemo: PUBLIC_DEMO });
     }
     if (method === "POST" && path === "/api/login") {
-      if (!auth.ownerToken) return json(res, 200, { ok: true });
+      if (!auth.ownerToken || PUBLIC_DEMO) return json(res, 200, { ok: true });
       if (limiter.blocked(clientIp(req))) return json(res, 429, { error: "Too many attempts. Try again in a few minutes." });
       const { token } = await readBody(req, 4096);
       if (typeof token !== "string" || !same(token, auth.ownerToken)) {
@@ -254,7 +279,11 @@ const server = createServer(async (req, res) => {
     }
 
     // ---------- Everything else needs a caller ----------
-    const who: Caller = identify(req, auth);
+    const who: Caller = caller(req);
+    if (PUBLIC_DEMO && method === "POST" && COSTLY.has(path)) {
+      if (costlyLimiter.blocked(clientIp(req))) return json(res, 429, { error: "Demo limit reached for now. Try again in an hour, or run Tripwire locally." });
+      costlyLimiter.fail(clientIp(req));
+    }
     if (who.role === "anon") return json(res, 401, { error: "Sign in with the owner token, or send an agent API key as a Bearer token." });
     if (method !== "GET" && !req.headers.authorization && !sameOrigin(req)) return json(res, 403, { error: "Cross-site request refused." });
     const owner = who.role === "owner";
@@ -305,6 +334,17 @@ const server = createServer(async (req, res) => {
         sseClients.delete(res);
       });
       return;
+    }
+
+    // The owner's verdict after the fact: it teaches calibration and Reppo's track record.
+    const fb = path.match(/^\/api\/receipts\/([\w-]+)\/feedback$/);
+    if (method === "POST" && fb) {
+      const { rating, note } = await readBody(req);
+      if (rating !== "good" && rating !== "bad") return json(res, 400, { error: "rating must be good|bad" });
+      if (note !== undefined && typeof note !== "string") return json(res, 400, { error: "note must be a string" });
+      const out = engine.feedback(fb[1], rating, note);
+      if (typeof out === "string") return json(res, out === "unknown receipt" ? 404 : 409, { error: out });
+      return json(res, 200, out);
     }
 
     // Unknown payment outcomes: ask Kite again (same idempotency key, never pays twice), or settle by hand.
@@ -392,7 +432,7 @@ const server = createServer(async (req, res) => {
 server.listen(port, host, () => {
   console.log(`Tripwire on http://${host.includes(":") ? `[${host}]` : host}:${port}${PUBLIC_URL.startsWith("http://127") ? "" : ` (public: ${PUBLIC_URL})`}`);
   console.log("Modes:", describeModes(cfg));
-  console.log(auth.ownerToken ? `Owner login required. ${auth.agentKeys.size} agent key(s) loaded.` : "Open local demo: no login (loopback only).");
+  console.log(PUBLIC_DEMO ? "Public demo: open to anyone, rate-limited, no real money." : auth.ownerToken ? `Owner login required. ${auth.agentKeys.size} agent key(s) loaded.` : "Open local demo: no login (loopback only).");
 });
 
 // Finish the in-flight write before exiting.

@@ -57,9 +57,10 @@ The server binds to `127.0.0.1:8787` by default. Request bodies must be JSON obj
 | `GET` | `/api/receipts/:id` | agent (own), owner | Full receipt (`404` if unknown or another agent's). |
 | `GET` | `/api/agent/policy` | agent, owner | The calling agent's limits: allowance left, caps, thresholds, payees, its rules. |
 | `GET` | `/api/events` | owner | Server-sent events: `{type:"receipt", receipt}` on every change, `{type:"policy"}`, `{type:"reset"}`. |
-| `GET` | `/api/state` | owner | Modes, policy, amount spent, receipts (newest first), calibration, agents. |
+| `GET` | `/api/state` | owner | Modes, policy, amount spent, receipts (newest first), calibration (payees with multipliers, tightened agents, Reppo's track record), agents. |
 | `POST` | `/api/receipts/:id/recheck` | owner | For a `payment_unknown` receipt: ask Kite again with the same idempotency key, or fetch a held payment's result. |
 | `POST` | `/api/receipts/:id/resolve` | owner | `{ "answer": "paid" \| "not_paid" }` for a `payment_unknown` receipt, after checking Kite's Activity page. |
+| `POST` | `/api/receipts/:id/feedback` | owner | `{ "rating": "bad" \| "good", "note"? }`. `bad` on a paid payment: you approve that payee for 30 days and the agent gets stricter checks. `good` on a blocked one: a clean signal. Once per payment (`409` after). |
 | `POST` | `/api/stepup/:id` | owner | `{ "answer": "approved" \| "declined" }`. Mock mode only; with `KITE_MODE=kpass` it returns `409`, and the owner uses their passkey. |
 | `GET` | `/api/replay` | owner | Six-week replay, with and without calibration. Always offline, cached. |
 | `POST` | `/api/policy/compile` | owner | `{ text }` → preview `{ id, changes[], unsupported[], policy, mode, costUsd }`. Changes nothing. |
@@ -146,7 +147,7 @@ interface StepRecord {
   reasons: string[];
   costUsd: number;
   latencyMs: number;
-  mode: "live" | "mock" | "sandbox";
+  mode: "live" | "mock";
   detail?: Record<string, unknown>;  // promptGuard, servTools, kiteDirectory, priceQuote, approvalUrl, splitTotalUsd, Reppo evalId, …
 }
 ```

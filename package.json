@@ -35,7 +35,8 @@
     "doctor": "node scripts/doctor.ts",
     "test": "node --test --test-timeout=30000 \"test/**/*.test.ts\"",
     "typecheck": "tsc -p .",
-    "check": "npm run typecheck && npm test"
+    "check": "npm run typecheck && npm test",
+    "serv:bench": "node scripts/serv-bench.ts"
   },
   "devDependencies": {
     "@types/node": "25.9.9",

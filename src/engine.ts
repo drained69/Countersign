@@ -7,7 +7,7 @@ import { quotePrice } from "./adapters/x402.ts";
 import { PRICE_UNVERIFIED, runTier0 } from "./tiers/tier0.ts";
 import { randomUUID } from "node:crypto";
 import { runTier1, type ServConfig } from "./tiers/tier1Serv.ts";
-import { runTier2, type ReppoConfig } from "./tiers/tier2Reppo.ts";
+import { reppoConfigured, reppoOverDailyLimit, runTier2, type ReppoConfig } from "./tiers/tier2Reppo.ts";
 import type { PaymentIntent, PaymentResult, Policy, Receipt, StepRecord } from "./types.ts";
 
 export interface EngineConfig {
@@ -22,7 +22,10 @@ export interface EngineConfig {
 }
 
 /** Tier-0 flags that force at least a Reppo review regardless of amount or calibration. */
-const SERIOUS = /Couldn't confirm the merchant's price|looks like|instructions aimed|duplicate charge|above 80%|Unusual amount|Split payment|not listed in Kite|Outside .* allowed purchases|Would overdraw/i;
+/** Prefix of the tier-0 reason added when the owner recently reported a problem with this payee. */
+export const OWNER_REPORTED = "You reported a problem with a payment to";
+
+const SERIOUS = /You reported a problem with a payment to|Couldn't confirm the merchant's price|looks like|instructions aimed|duplicate charge|above 80%|Unusual amount|Split payment|not listed in Kite|Outside .* allowed purchases|Would overdraw/i;
 
 export function planTier(
   amountUsd: number,
@@ -38,6 +41,8 @@ export function planTier(
   if (tier0.reasons.some((r) => SERIOUS.test(r))) tier = 2;
   // An unconfirmed price is only safe through a passkey session capped at the requested amount.
   if (tier0.reasons.some((r) => r.startsWith(PRICE_UNVERIFIED))) return 3;
+  // The owner reported this payee recently: the owner approves its payments for the window.
+  if (tier0.reasons.some((r) => r.startsWith(OWNER_REPORTED))) return 3;
   return tier;
 }
 
@@ -74,7 +79,7 @@ export class Engine {
 
   private effectivePolicy(): Policy {
     const learned = this.calibration
-      .toJSON()
+      .payees()
       .filter((s) => s.learnedKnown)
       .map((s) => ({ payee: s.payee, name: s.payee }));
     return { ...this.cfg.policy, knownPayees: [...this.cfg.policy.knownPayees, ...learned] };
@@ -136,7 +141,13 @@ export class Engine {
       quote,
     });
     const payeeKnown = policy.knownPayees.some((k) => k.payee === intent.payee);
-    const thresholds = this.calibration.thresholds(intent.payee, policy);
+    // Learned from the owner: a reported payee needs the owner's approval for the report window.
+    const report = this.calibration.recentReport(intent.payee);
+    if (report && tier0.outcome !== "block") {
+      tier0.outcome = "escalate";
+      tier0.reasons.unshift(`${OWNER_REPORTED} ${intent.payee} on ${report.reportedAt.slice(0, 10)}, so you approve its payments until ${report.until.slice(0, 10)}.`);
+    }
+    const thresholds = this.calibration.thresholds(intent.payee, policy, intent.agentId);
     const plannedTier = planTier(intent.amountUsd, tier0, thresholds, payeeKnown);
     tier0.detail = { ...tier0.detail, thresholds };
 
@@ -157,11 +168,11 @@ export class Engine {
     }
 
     if (next === 2) {
-      // Reppo's sandbox returns placeholder verdicts, so it never stands in for review of a real payment.
-      const s2 = live && !(this.cfg.reppo.creditToken && !this.cfg.reppo.sandbox)
-        ? notConfigured(2, "Reppo network verdict", "network", "REPPO_CREDIT_TOKEN (with REPPO_SANDBOX=false)")
+      const s2 = live && (!reppoConfigured(this.cfg.reppo) || reppoOverDailyLimit(this.cfg.reppo))
+        ? notConfigured(2, "Reppo network verdict", "network", reppoConfigured(this.cfg.reppo) ? "a higher REPPO_DAILY_LIMIT" : "REPPO_API_KEY or REPPO_CREDIT_TOKEN")
         : await runTier2(intent, flags(), this.cfg.reppo);
       this.push(receipt, s2);
+      if (typeof s2.detail?.route === "string") this.calibration.recordReppo(s2.detail.route);
       if (s2.outcome === "block") {
         this.calibration.recordIncident(intent.payee);
         return this.finish(receipt, "blocked");
@@ -174,6 +185,8 @@ export class Engine {
 
     if (next === 3) {
       const answer = await this.askHuman(receipt);
+      // Reppo's track record: did the owner agree with the review it asked for?
+      if (answer !== "failed") this.calibration.recordOwnerAnswer(reppoRoute(receipt), answer);
       if (answer !== "approved") {
         // A Kite failure says nothing about the payee; only the owner's decline is an incident.
         if (answer === "declined") this.calibration.recordIncident(intent.payee);
@@ -292,6 +305,26 @@ export class Engine {
     return r;
   }
 
+  /**
+   * The owner's verdict after the fact. "bad" on a paid payment: an incident for the payee, a report against the
+   * agent, and the owner approves that payee's payments for the report window. "good" on a blocked payment:
+   * a clean signal for the payee. Either way Reppo's track record is updated if Reppo judged it.
+   */
+  feedback(id: string, rating: "good" | "bad", note?: string): Receipt | string {
+    const r = this.receipts.get(id);
+    if (!r) return "unknown receipt";
+    if (r.status !== "approved" && r.status !== "blocked") return "Only decided payments take feedback.";
+    if (r.feedback) return "Feedback was already given for this payment.";
+    if (rating === "bad" && r.status !== "approved") return "Only a paid payment can be reported as a problem.";
+    if (rating === "good" && r.status !== "blocked") return "Only a blocked payment can be marked as fine.";
+    r.feedback = { rating, note: note?.slice(0, 500), at: new Date().toISOString() };
+    if (rating === "bad") this.calibration.recordReport(r.intent.payee, r.intent.agentId);
+    else this.calibration.recordClean(r.intent.payee);
+    this.calibration.recordFeedbackOnReppo(reppoRoute(r), rating);
+    this.emit(r);
+    return r;
+  }
+
   /** The owner settles an unknown outcome after checking Kite's Activity page. */
   resolve(id: string, answer: "paid" | "not_paid"): Receipt | undefined {
     const r = this.receipts.get(id);
@@ -301,6 +334,12 @@ export class Engine {
     this.emit(r);
     return r;
   }
+}
+
+/** The route Reppo gave this payment, if Reppo judged it. */
+function reppoRoute(r: Receipt): string | undefined {
+  const s = r.steps.find((x) => x.tier === 2 && typeof x.detail?.route === "string");
+  return s?.detail?.route as string | undefined;
 }
 
 /** Start of the current allowance period in UTC (weeks start Monday). */

@@ -55,8 +55,21 @@ if (cfg.serv.apiKey) {
   }
 } else line("warn", `No SERV_API_KEY: ${live ? "tier 1 hands every checked payment to you" : "tier 1 uses the offline stand-in"}`);
 
-const reppoLive = Boolean(cfg.reppo.creditToken && !cfg.reppo.sandbox);
-line(reppoLive ? true : "warn", reppoLive ? "Reppo credit token set (live verdicts)" : `Reppo ${cfg.reppo.sandbox ? "sandbox (placeholder verdicts)" : "not configured"}: ${live ? "tier 2 hands those payments to you" : "tier 2 uses the offline stand-in"}`);
+const reppoLive = Boolean(cfg.reppo.apiKey || cfg.reppo.creditToken);
+if (reppoLive) {
+  try {
+    // Free reads: the key or token is checked by listing nothing / reading the balance.
+    const url = cfg.reppo.apiKey ? `${cfg.reppo.baseUrl}/api/v1/agents/evals/doctor-probe` : `${cfg.reppo.baseUrl}/api/v1/x402/credits`;
+    const res = await fetch(url, { headers: { Authorization: `Bearer ${cfg.reppo.apiKey ?? cfg.reppo.creditToken}` }, signal: AbortSignal.timeout(10_000) });
+    const body: any = await res.json().catch(() => ({}));
+    const ok = cfg.reppo.apiKey ? res.status === 404 : res.ok; // a valid key gets 404 for an unknown id; a bad one gets 401
+    line(ok, cfg.reppo.apiKey
+      ? `Reppo API key ${ok ? "accepted" : `rejected (HTTP ${res.status})`}`
+      : `Reppo credit token ${ok ? `accepted · ${body.balance} credits (${Math.floor((body.balance ?? 0) / 440)} evaluations)` : `rejected (HTTP ${res.status})`}`);
+  } catch (err) {
+    line(false, `Reppo unreachable: ${(err as Error).message}`);
+  }
+} else line("warn", `Reppo not configured: ${live ? "tier 2 hands those payments to you" : "tier 2 uses the offline stand-in"}. Free option: sign in at eval.reppo.xyz, generate an API key, set REPPO_API_KEY.`);
 
 if (process.env.NOTIFY_WEBHOOK_URL) line(/^https:\/\//.test(process.env.NOTIFY_WEBHOOK_URL), "Step-up notifications go to NOTIFY_WEBHOOK_URL");
 else line("warn", "No NOTIFY_WEBHOOK_URL: you'll only see step-ups on the dashboard");

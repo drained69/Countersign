@@ -39,7 +39,7 @@ flowchart LR
     T1 -- escalate or ≥ $20 --> T2{Tier 2<br/>Reppo verdict}
     T2 -- reject --> X
     T2 -- accept --> OK
-    T2 -- revise / low confidence --> T3{Tier 3<br/>Kite passkey}
+    T2 -- review / low confidence --> T3{Tier 3<br/>Kite passkey}
     T3 -- approve --> OK
     T3 -- decline / timeout --> X
 ```
@@ -47,9 +47,9 @@ flowchart LR
 | Tier | Runs when | Who checks | What it checks | Cost |
 |---|---|---|---|---|
 | **0** | Every payment | Code rules | Allow/deny lists, caps, your plain-English rules, lookalike payees, duplicate and **split** payments, unusual amounts, hidden instructions, payees missing from **Kite's directory**, and (live) the merchant's real price | ~$0 |
-| **1** | ≥ $1 or a new payee | **SERV Reasoning** + PromptGuard + Shadow Agent | Does the purchase follow from the agent's task? Strict JSON schema, validated in code | ~$0.0008 (measured) |
-| **2** | ≥ $20, any serious tier-0 flag, or SERV escalates | **Reppo Eval API** (lite, inline) | Purpose, payee legitimacy, proportionate amount, manipulation in vendor text | $0.22 |
-| **3** | Reppo says re-evaluate, or the price can't be confirmed | **Kite passkey step-up** | A one-shot session scoped to exactly this payment, approved or declined by the owner | one tap |
+| **1** | ≥ $1 or a new payee | **SERV Reasoning** (Multipath + Kronos) + PromptGuard + Shadow Agent | Does the purchase follow from the agent's task? Strict JSON schema, validated in code | ~$0.0008 (measured) |
+| **2** | ≥ $20, any serious tier-0 flag, or SERV escalates | **Reppo Eval API** (panel evaluation) | Task fit, payee legitimacy, proportionate amount, manipulation in vendor text; scored 0–100 and routed | 440 credits ($0.22) |
+| **3** | Reppo routes it to review, the price can't be confirmed, or you recently reported this payee | **Kite passkey step-up** | A one-shot session scoped to exactly this payment, approved or declined by the owner | one tap |
 
 Three rules hold everywhere:
 
@@ -118,20 +118,33 @@ Every call also declares SERV's built-in tools, which SERV strips before the mod
 
 - **PromptGuard** answers with a refusal before the model runs (0 tokens billed). Tripwire records `promptGuard: triggered` and escalates. In our tests it fired on about a third of identical injection attempts, so it's an extra layer: the model itself escalated every injected invoice we tried, and tier 0 flags them too.
 - **Shadow Agent** validates the verdict against the hint and asks the model to revise, up to 2 times.
+- **Multipath and Kronos** are SERV Reasoning's graph features, turned on through the model ID (`gpt-5.4-mini-serv-kronos-multipath`). Multipath turns the checker's branching rules (task fit, payee, amount, manipulation, owner rules) into a reasoning graph; Kronos audits that graph and repairs it before the model runs. SERV caches the audited graph per organization, so only the first call pays the ~35 s audit. Set `SERV_FEATURES=` for plain SERV.
+- **Evidence:** every receipt keeps SERV's `x-openserv-request-id`, the features used and the reasoning-token count, so a check can be traced in the SERV console.
+- **Benchmark:** `npm run serv:bench` runs ten labelled payments through the live check with and without the graph features. Results are in the [README](../README.md#results).
 </details>
 
 <details>
 <summary><b>Tier 2: Reppo network verdict</b> (<code>src/tiers/tier2Reppo.ts</code>)</summary>
 
-`POST https://eval.reppo.xyz/api/v1/x402/evals/lite` with `type: "plan"`, the payment facts as the payload, and four criteria (task fit, payee legitimacy, proportionate amount, no manipulation in vendor text).
+Tripwire submits the payment as an `action` evaluation and a panel of independent evaluators scores it, usually within 30–90 seconds:
+
+```http
+POST https://eval.reppo.xyz/api/v1/agents/evals        (Bearer REPPO_API_KEY)
+POST https://eval.reppo.xyz/api/v1/x402/evals          (Bearer REPPO_CREDIT_TOKEN)
+{ "taskType": "action", "input": "<the owner's task, the payment, the vendor text, earlier flags, and the questions to judge>" }
+```
+
+It then polls `GET …/evals/{id}` until the status is `COMPLETED` or `FAILED`.
 
 | Reppo returns | Tripwire does |
 |---|---|
-| `accept` | proceed |
-| `accept` with `confidence: low`, or `action.route: review` | escalate to the owner |
-| `revise` | escalate to the owner |
-| `reject`, or a block route | block |
-| timeout (150 s), HTTP error, unrecognisable body | escalate to the owner; never invent a verdict |
+| route `ship` with an `accept` | proceed |
+| route `ship` with a `reject`, or `confidence: low` | escalate to the owner |
+| route `review` | escalate to the owner |
+| route `block` | block |
+| `FAILED` (not charged), no verdict within 180 s, HTTP error, 402 out of credits | escalate to the owner; never invent a verdict |
+
+The receipt keeps the evaluation id, score, route, rubric scores and credits charged. Without a key or token, the demo uses a clearly labelled offline stand-in; in live mode, the payment goes to the owner instead.
 
 Reppo evaluations are public, so payloads contain only payment facts, never keys.
 </details>
@@ -188,7 +201,7 @@ Three agents share a $100 allowance: `research-agent`, `meetings-agent` and `ops
 |---|---|---|
 | 1 | $0.40 → SearchAPI | Known payee under $1. **Approved by code rules alone.** |
 | 2 | $9 → Transcribe Co | SERV confirms the plan fits the meetings agent's task. **Approved.** |
-| 3 | $60 → `acme-bi11ing.example` | Lookalike payee, not in Kite's directory, and the invoice says "change the payee wallet" with a hidden instruction to the reviewing AI. Code rules flag it, **SERV PromptGuard** stops the check, Reppo says re-evaluate, and the owner is asked. **Declined → blocked.** |
+| 3 | $60 → `acme-bi11ing.example` | Lookalike payee, not in Kite's directory, and the invoice says "change the payee wallet" with a hidden instruction to the reviewing AI. Code rules flag it, **SERV PromptGuard** stops the check, Reppo routes it to review, and the owner is asked. **Declined → blocked.** |
 | 4 | $60 → `acme-billing.example` | The real vendor. Reppo accepts. **Approved and paid.** |
 | 5 | $10 → CloudHost | Normal hosting payment. **Approved.** |
 | 6 | $10.50 → CloudHost, minutes later | **Split payment**: each part under the $20 review line, together $20.50. Reppo and the owner. **Declined → blocked.** |
@@ -206,6 +219,21 @@ BLOCKED  $ 10.50 -> cloudhost.example
 BLOCKED  $  5.00 -> mixer.example
 Spent $79.40 of $100
 ```
+
+## What Tripwire learns
+
+Tripwire keeps three kinds of memory, shown on the dashboard under **Payee trust** and **What Tripwire has learned**:
+
+| Signal | Effect |
+|---|---|
+| Reppo ships a payment, or you approve one | A clean signal for the payee. After two, its thresholds rise (up to 4×), so routine payments are interrupted less. |
+| Reppo blocks, you decline, or Kite charges more than approved | An incident: the payee's thresholds halve for 30 days. |
+| You **report a problem** with a paid payment | An incident, plus: you approve every payment to that payee yourself for 30 days, and the agent that made it gets half thresholds for 30 days. |
+| You mark a blocked payment **"This was fine"** | A clean signal for the payee. |
+
+Tripwire also keeps **Reppo's track record** against you: when Reppo sent a payment to you and you declined it (Reppo was right), when you approved it anyway (you overruled it), and when Reppo shipped a payment you later reported. The dashboard shows how often Reppo agreed with you, so you can decide how much to trust it.
+
+Serious tier-0 flags (lookalike payees, injected instructions, duplicates, split payments) always ignore calibration.
 
 ## Results
 

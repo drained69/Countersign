@@ -9,7 +9,13 @@
     const d = s.detail ?? {};
     const out = [];
     if (d.promptGuard) out.push(`PromptGuard: ${d.promptGuard}`);
-    if (d.servTools) out.push(`SERV tools: ${d.servTools.join(", ")}`);
+    if (d.servFeatures) out.push(`SERV: ${d.servFeatures.join(", ")}`);
+    else if (d.servTools) out.push(`SERV tools: ${d.servTools.join(", ")}`);
+    if (d.model && s.tier === 1) out.push(`model ${d.model}`);
+    if (d.servRequestId) out.push(`SERV request ${d.servRequestId}`);
+    if (d.reasoningTokens) out.push(`${d.reasoningTokens} reasoning tokens`);
+    if (s.tier === 2 && d.route) out.push(`Reppo route ${d.route}${Number.isFinite(d.score) ? ` · ${d.score}/100` : ""}${d.evaluators ? ` · ${d.evaluators} evaluators` : ""}`);
+    if (d.creditsCharged) out.push(`${d.creditsCharged} Reppo credits`);
     if (d.kiteDirectory) {
       const k = d.kiteDirectory;
       out.push(k.listed ? `Kite directory: listed${k.serviceId ? ` (${k.serviceId})` : ""}` : k.error ? "Kite directory: lookup failed" : "Kite directory: not listed");
@@ -71,7 +77,9 @@
       ${pm?.merchantStatus !== undefined ? `<dt>Merchant answered</dt><dd>HTTP ${esc(pm.merchantStatus)}</dd>` : ""}
       ${pm?.userMessage ? `<dt>Kite says</dt><dd>${esc(pm.userMessage)}</dd>` : ""}
       ${pm?.idempotencyKey ? `<dt>Idempotency key</dt><dd class="mono">${esc(pm.idempotencyKey)}</dd>` : ""}
-      ${pm?.txHash ? `<dt>Transaction</dt><dd>${esc(pm.txHash)}</dd>` : ""}
+      ${pm?.txHash ? `<dt>Transaction</dt><dd class="mono">${esc(pm.txHash)}</dd>` : ""}
+      ${pm?.chainId ? `<dt>Settled on</dt><dd>${esc({ 8453: "Base", 137: "Polygon", 43114: "Avalanche", 5042: "Arc" }[pm.chainId] ?? `chain ${pm.chainId}`)}</dd>` : ""}
+      ${r.feedback ? `<dt>Your feedback</dt><dd>${r.feedback.rating === "bad" ? "Reported a problem" : "Marked the block as wrong"} · ${esc(r.feedback.at.slice(0, 10))}${r.feedback.note ? ` · “${esc(r.feedback.note)}”` : ""}</dd>` : ""}
       ${pm?.explorerUrl && /^https:\/\//.test(pm.explorerUrl) ? `<dt>Explorer</dt><dd><a href="${esc(pm.explorerUrl)}" target="_blank" rel="noopener">View on Kite →</a></dd>` : ""}`;
 
     const block = (label, body, warn) => `<div><div class="label" style="margin-bottom:6px${warn ? ";color:var(--bad)" : ""}">${label}</div><div style="color:var(--ink-2)">${body}</div></div>`;

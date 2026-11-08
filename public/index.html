@@ -136,7 +136,11 @@
         <div class="card">
           <div class="card-head"><h3>Payee trust</h3><span class="label">Calibration</span></div>
           <div class="table-scroll"><table class="trust" id="trust"></table></div>
-          <p class="small muted" style="margin:0;padding:12px 14px 16px;border-top:1px solid var(--line)">Clean verdicts raise a payee's thresholds (up to 4×) after two signals; any incident halves them. Serious flags ignore this.</p>
+          <p class="small muted" style="margin:0;padding:12px 14px 16px;border-top:1px solid var(--line)">Clean verdicts raise a payee's thresholds (up to 4×) after two signals; an incident halves them for 30 days. Serious flags ignore this.</p>
+        </div>
+        <div class="card">
+          <div class="card-head"><h3>What Tripwire has learned</h3><span class="label">From you and Reppo</span></div>
+          <div id="learning"></div>
         </div>
         <div class="card">
           <div class="card-head"><h3>Policy</h3><span class="label" id="policyLabel"></span></div>

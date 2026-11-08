@@ -11,8 +11,12 @@ import { isIP } from "node:net";
 import type { PaymentIntent } from "../types.ts";
 
 export interface PriceQuote {
-  /** Highest price the merchant accepts for this request, in USD. Undefined when it couldn't be read. */
+  /** Cheapest price, in USD, among the merchant's options Kite can pay. Undefined when it couldn't be read. */
   priceUsd?: number;
+  /** Highest price among the options Kite could settle on. */
+  maxUsd?: number;
+  /** Whether the merchant offered a network Kite can pay on. */
+  kiteNetwork?: boolean;
   /** HTTP status of the unpaid request. 402 means the merchant asked for payment. */
   status?: number;
   error?: string;
@@ -67,8 +71,23 @@ function toUsd(raw: unknown, atomic: boolean, decimals = 6): number | undefined 
   return Number.isFinite(n) ? n : undefined;
 }
 
-/** Reads the price from an x402 challenge (header or body). Returns the highest accepted price. */
-export function parseChallenge(headers: Record<string, string | string[] | undefined>, body: string): number | undefined {
+/**
+ * Networks Kite Passport can settle on (CAIP-2), per Kite's published reference: Base, Polygon, Avalanche,
+ * Arc (and Arc testnet) and Solana. Merchants often list many more; only these can be what Kite pays.
+ */
+const KITE_NETWORKS = /^(eip155:(8453|137|43114|5042|5042002)|solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp)$/;
+
+export interface ChallengePrice {
+  /** What Tripwire compares against the agent's amount: the cheapest option Kite can pay. */
+  priceUsd: number;
+  /** The highest option on a Kite network, for the receipt (Kite chooses where it settles). */
+  maxUsd: number;
+  /** Whether any option was on a network Kite can pay; if none was, the prices are from every option. */
+  kiteNetwork: boolean;
+}
+
+/** Reads the price from an x402 challenge (header or body). */
+export function parseChallengePrice(headers: Record<string, string | string[] | undefined>, body: string): ChallengePrice | undefined {
   const docs: any[] = [];
   for (const h of ["payment-required", "x-payment-required"]) {
     const v = headers[h];
@@ -85,7 +104,7 @@ export function parseChallenge(headers: Record<string, string | string[] | undef
     docs.push(JSON.parse(body));
   } catch {}
 
-  const prices: number[] = [];
+  const options: { price: number; kite: boolean }[] = [];
   for (const doc of docs) {
     if (!doc || typeof doc !== "object") continue;
     const accepts = doc.accepts ?? doc.payment?.accepts ?? doc.paymentRequirements;
@@ -94,19 +113,27 @@ export function parseChallenge(headers: Record<string, string | string[] | undef
         const decimals = Number(a?.extra?.decimals ?? a?.decimals ?? 6);
         const atomic = a?.maxAmountRequired !== undefined || doc.x402Version !== undefined || /^0x[0-9a-f]{40}$/i.test(String(a?.asset ?? ""));
         const p = toUsd(a?.maxAmountRequired ?? a?.amount ?? a?.price, atomic, Number.isFinite(decimals) ? decimals : 6);
-        if (p !== undefined) prices.push(p);
+        if (p !== undefined) options.push({ price: p, kite: KITE_NETWORKS.test(String(a?.network ?? "")) });
       }
       continue;
     }
     for (const v of [doc.price, doc.amount, doc.cost?.amount, doc.fee, doc.required_payment?.amount]) {
       const p = toUsd(v, false);
       if (p !== undefined) {
-        prices.push(p);
+        options.push({ price: p, kite: true });
         break;
       }
     }
   }
-  return prices.length ? Math.max(...prices) : undefined;
+  const kite = options.filter((o) => o.kite);
+  const pool = (kite.length ? kite : options).map((o) => o.price);
+  if (!pool.length) return undefined;
+  return { priceUsd: Math.min(...pool), maxUsd: Math.max(...pool), kiteNetwork: kite.length > 0 };
+}
+
+/** The price Tripwire checks against: the cheapest option Kite can pay. */
+export function parseChallenge(headers: Record<string, string | string[] | undefined>, body: string): number | undefined {
+  return parseChallengePrice(headers, body)?.priceUsd;
 }
 
 /** Sends the request the payment would make, unpaid, and reads the merchant's price. Never pays. */
@@ -146,8 +173,8 @@ export function quotePrice(intent: PaymentIntent, timeoutMs = 10_000): Promise<P
         res.on("close", () => {
           const status = res.statusCode;
           if (status !== 402) return resolve({ status });
-          const priceUsd = parseChallenge(res.headers, Buffer.concat(chunks).toString("utf8"));
-          resolve(priceUsd === undefined ? { status, error: "Couldn't read the merchant's price from its payment challenge." } : { status, priceUsd });
+          const price = parseChallengePrice(res.headers, Buffer.concat(chunks).toString("utf8"));
+          resolve(price === undefined ? { status, error: "Couldn't read the merchant's price from its payment challenge." } : { status, ...price });
         });
       },
     );

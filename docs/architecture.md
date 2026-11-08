@@ -73,10 +73,10 @@ sequenceDiagram
         T->>M: same request, unpaid → read x402 price
     end
     T->>T: Tier 0 rules → plan tier 2
-    T->>S: Tier 1 task match (PromptGuard, Shadow Agent)
+    T->>S: Tier 1 task match (Multipath + Kronos, PromptGuard, Shadow Agent)
     S-->>T: escalate
-    T->>R: Tier 2 lite eval
-    R-->>T: revise
+    T->>R: Tier 2 panel evaluation, poll until done
+    R-->>T: route review
     T->>K: session create (one payment, exact amount, 15 min)
     K-->>O: passkey approval link (dashboard + webhook)
     O->>K: approve with passkey
@@ -117,12 +117,12 @@ To report a vulnerability, see [SECURITY.md](../SECURITY.md).
 
 | Sponsor | Feature | Where Tripwire uses it | Status |
 |---|---|---|---|
-| **OpenServ SERV** | Reasoning API, strict `json_schema` | Tier 1 task check; compiling plain-English rules into policy | ✅ live |
+| **OpenServ SERV** | Reasoning API with **Multipath** and **Kronos** (model feature suffix), strict `json_schema`, `reasoning_effort` | Tier 1 task check; compiling plain-English rules into policy; `npm run serv:bench` | ✅ live, benchmarked |
 | | **PromptGuard** (`serv_prompt_guard`) | Every tier-1 call and the policy compiler: stops vendor text that tries to override the checker | ✅ live, seen firing |
-| | **Shadow Agent** (`serv_shadow_agent`) | Every tier-1 call: validates the verdict against a hint and makes the model revise | ✅ enabled |
-| **Reppo** | Eval API, lite evals (proceed / re-evaluate / block) | Tier 2 network verdict, incl. `confidence` and `action.route` | ✅ live in sandbox |
-| **Kite** | Agent Passport: account allowance, spending sessions, idempotent x402 execute | Payments via `kpass session execute` with an idempotency key; a passkey-approved session capped at exactly one payment for every step-up; held and pending outcomes handled without paying twice | 🟡 built to Kite's published CLI reference (kpass ≥ 6.8.9), tested against a simulated kpass; not yet run with a real account |
-| | Service directory (`ksearch service search`) | Unlisted new payees get network review | 🟡 same |
+| | **Shadow Agent** (`serv_shadow_agent`) | Every tier-1 call: validates the verdict against a hint and makes the model revise | ✅ enabled; every receipt records SERV's request id |
+| **Reppo** | Eval API panel evaluations (score 0–100, route ship / review / block), by API key or x402 credit token | Tier 2 network verdict; Reppo's agreement with the owner is tracked | 🟡 built and tested to the current API; needs a key or token to run live |
+| **Kite** | Agent Passport: account allowance, spending sessions, idempotent x402 execute, activity log | Payments via `kpass session execute` with an idempotency key; a passkey-approved session capped at exactly one payment for every step-up; transaction hashes and rechecks from `kpass activity` | ✅ real payment made on Base (`0xdba0dc85…`) |
+| | Service catalog (`ksearch service search`) | Unlisted new payees get network review | ✅ checked live against the real catalog |
 | | Agent integration (Passport skills, MCP) | Tripwire ships as an MCP server: any agent pays through `tripwire_pay` | ✅ tested with an MCP client |
 
 See [Integration status](#integration-status) for the evidence behind each line.
@@ -131,9 +131,9 @@ See [Integration status](#integration-status) for the evidence behind each line.
 
 | Sponsor | Status | Evidence |
 |---|---|---|
-| **SERV Reasoning** | ✅ **Verified live** | `gpt-5.4-mini` with a strict `json_schema`, PromptGuard and Shadow Agent. It passed purchases matching the task, escalated vendor text trying to change payment details, and blocked an off-task gift-card purchase. PromptGuard fired live on the demo's injected invoice. The policy compiler also runs live. About $0.0008 and 6–18 s per check. |
-| **Reppo** | ✅ **Verified live in sandbox** | `POST /api/v1/x402/evals/lite` with `Sandbox: true`. The full stage demo runs against it (`REPPO_SANDBOX=true npm run demo`), at about 4 s per evaluation. The response shape (`result.verdict`, `verdicts[]`, `action.route`) is parsed and tested. Paid verdicts need a credit token. |
-| **Kite** | 🟡 **Built to Kite's published reference, not yet run with a real account** | Follows the command reference in Kite's official [passport-skills](https://github.com/gokite-ai/passport-skills) (kpass 6.8.9+): `session execute` with `--idempotency-key` and `--use-allowance` / `--session-id`; `session create --separate` + `session status --wait` for step-ups; `session updates` for held payments; `ksearch service search` for the directory. The JSON envelopes and exit codes (success, `human_action_required`, exit 3 rejected/expired, exit 6 policy, exit 7 pending/held, exit 1 bridge failures) are handled and tested against a simulated kpass, and the full live server flow runs end to end against it. What still needs a real account: one $0.01 payment, to confirm the live replies match the reference. |
+| **SERV Reasoning** | ✅ **Verified live, benchmarked** | `gpt-5.4-mini-serv-kronos-multipath` (Multipath turns the checker's branching rules into a reasoning graph; Kronos audits and repairs it; SERV caches it per organization) with a strict `json_schema`, `reasoning_effort: low`, PromptGuard and Shadow Agent. Every receipt keeps SERV's `x-openserv-request-id`, traceable in the SERV console. In a live benchmark of 20 labelled checks per setting, neither plain SERV nor Multipath + Kronos let a bad payment through (17–18 of 20 correct; the misses were PromptGuard false alarms). About $0.0008 and 6–8 s per check; the first Kronos audit of a prompt takes ~35 s. |
+| **Reppo** | 🟡 **Built to the current API; live with a key** | Reppo retired the lite endpoint and sandbox in favour of panel evaluations. Tripwire submits `{ taskType: "action", input }` to `/api/v1/agents/evals` (API key) or `/api/v1/x402/evals` (credit token), polls until `COMPLETED` or `FAILED`, and acts on `result.route`. The exchange is tested against a local stub; a live verdict needs `REPPO_API_KEY` (free sign-up credits) or a credit token. |
+| **Kite** | ✅ **Real payment made** | kpass 6.13.1 and ksearch 6.13.1, account allowance on Base. Tripwire paid $0.001 to `agent402.tools`: tier 0 confirmed the merchant's x402 price (cheapest option on a chain Kite pays) and its catalog listing, SERV passed it, and `kpass session execute --use-allowance --idempotency-key …` paid. The merchant answered HTTP 200, the wallet moved by exactly $0.001, and `kpass activity` records transaction `0xdba0dc8573fbddcdd0b6d2ff5e8c936f84372afa277b510dbd99a33432dfbb20`. Two differences from Kite's published reference were found and handled: the execute reply carries no transaction hash (Tripwire reads it from the activity log), and kpass 6.13.1 has no `session updates` (held payments are rechecked from the activity log). The passkey step-up is tested against a simulated kpass. |
 
 ## Project layout
 
@@ -144,7 +144,7 @@ tripwire/
 │   ├── engine.ts            the ladder: routing, escalation, step-up, payment, fail-closed errors
 │   ├── tiers/
 │   │   ├── tier0.ts         deterministic rules
-│   │   ├── tier1Serv.ts     SERV task-match check (PromptGuard, Shadow Agent)
+│   │   ├── tier1Serv.ts     SERV task-match check (Multipath + Kronos, PromptGuard, Shadow Agent)
 │   │   └── tier2Reppo.ts    Reppo verdict
 │   ├── adapters/
 │   │   ├── kite.ts          kpass payments, passkey step-up session, outcome handling, ksearch directory

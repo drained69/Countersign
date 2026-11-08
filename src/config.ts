@@ -57,16 +57,23 @@ export function loadConfig(overrides: Partial<EngineConfig> = {}): EngineConfig 
       apiKey: env.SERV_API_KEY || undefined,
       baseUrl: env.SERV_BASE_URL || "https://inference-api.openserv.ai",
       model: env.SERV_MODEL || "gpt-5.4-mini",
+      // SERV Reasoning graph features (Multipath + Kronos). Set SERV_FEATURES= (empty) for plain SERV.
+      features: env.SERV_FEATURES ?? "kronos-multipath",
+      reasoningEffort: env.SERV_REASONING_EFFORT || "low",
       // Placeholder prices for the receipt; set to the model's listed SERV price.
       priceIn: Number(env.SERV_PRICE_IN ?? 0.75),
       priceOut: Number(env.SERV_PRICE_OUT ?? 4.5),
     },
     reppo: {
+      apiKey: env.REPPO_API_KEY || undefined,
       creditToken: env.REPPO_CREDIT_TOKEN || undefined,
-      sandbox: env.REPPO_SANDBOX === "true",
       baseUrl: env.REPPO_BASE_URL || "https://eval.reppo.xyz",
       costUsd: 0.22,
-      timeoutMs: 150_000,
+      // The panel answers in 30-90 s; allow for queueing before handing the payment to the owner.
+      timeoutMs: 180_000,
+      // Cap on live panel evaluations per UTC day (0 or empty: no cap). Over it: the demo uses the
+      // labelled stand-in, live mode hands the payment to the owner.
+      dailyLimit: Number(env.REPPO_DAILY_LIMIT) || undefined,
     },
     kiteMode: env.KITE_MODE === "kpass" ? "kpass" : "mock",
     kite: {
@@ -82,8 +89,8 @@ export function describeModes(cfg: EngineConfig): Record<string, string> {
   // With real payments, an unconfigured check doesn't fall back to a stand-in: the owner decides instead.
   const off = cfg.kiteMode === "kpass" ? "off (owner decides)" : "mock";
   return {
-    serv: cfg.serv.apiKey ? `live (${cfg.serv.model})` : off,
-    reppo: cfg.reppo.creditToken && !cfg.reppo.sandbox ? "live" : cfg.kiteMode === "kpass" ? off : cfg.reppo.sandbox ? "sandbox" : "mock",
+    serv: cfg.serv.apiKey ? `live (${cfg.serv.model}${cfg.serv.features ? ` + ${cfg.serv.features}` : ""})` : off,
+    reppo: cfg.reppo.apiKey || cfg.reppo.creditToken ? "live" : off,
     kite: cfg.kiteMode === "kpass" ? "live (kpass)" : "mock",
   };
 }

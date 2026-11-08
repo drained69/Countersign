@@ -1,0 +1,12 @@
+{
+  "allowanceUsd": 0.4,
+  "resetPeriod": "weekly",
+  "maxPerTxUsd": 0.1,
+  "newPayeeMaxUsd": 0.1,
+  "tier1MinUsd": 0.02,
+  "tier2MinUsd": 0.05,
+  "duplicateWindowMinutes": 60,
+  "knownPayees": [],
+  "denyPayees": [],
+  "agentRules": []
+}

@@ -17,7 +17,7 @@ const offline = () =>
   loadConfig({
     policy: structuredClone(DEMO_POLICY),
     serv: { apiKey: undefined, baseUrl: "", model: "", priceIn: 0, priceOut: 0 },
-    reppo: { creditToken: undefined, sandbox: false, baseUrl: "", costUsd: 0.22, timeoutMs: 1000 },
+    reppo: { creditToken: undefined, baseUrl: "", costUsd: 0.22, timeoutMs: 1000 },
     kiteMode: "mock",
   });
 

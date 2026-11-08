@@ -172,7 +172,11 @@ export function runTier0(intent: PaymentIntent, ctx: Tier0Context): StepRecord {
   const note: string[] = [];
   if (dir?.listed) note.push(`Listed in Kite's service directory${dir.name ? ` as ${dir.name}` : ""}.`);
   if (dir?.error) note.push("Kite directory lookup failed; payee treated as unverified.");
-  if (q?.priceUsd !== undefined && q.priceUsd <= intent.amountUsd + 1e-6) note.push(`Merchant's price confirmed: $${q.priceUsd.toFixed(4)}.`);
+  if (q?.priceUsd !== undefined && q.priceUsd <= intent.amountUsd + 1e-6) {
+    const more = q.maxUsd !== undefined && q.maxUsd > q.priceUsd + 1e-9 ? ` (up to $${q.maxUsd.toFixed(4)} on other chains; the receipt shows what Kite charged)` : "";
+    note.push(`Merchant's price confirmed: $${q.priceUsd.toFixed(4)}${more}.`);
+  }
+  if (q?.priceUsd !== undefined && q.kiteNetwork === false) note.push("The merchant lists no payment network Kite can settle on; Kite will likely refuse.");
 
   // The money goes to whatever the URL charges, so the URL must belong to the payee being checked.
   if (intent.url) {

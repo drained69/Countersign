@@ -1,7 +1,6 @@
 // Dashboard: live feed over SSE, metrics, agents, payee trust, policy, demo controls, step-up, replay chart.
 const { esc, usd, time, modeClass } = window.TW;
 const $ = (id) => document.getElementById(id);
-const MAX_MULTIPLIER = 4;
 
 let state;
 let filter = "all";
@@ -80,7 +79,8 @@ function render() {
   for (const r of receipts) seen.add(r.intent.id);
 
   renderAgents(receipts, policy);
-  renderTrust(policy, state.calibration ?? []);
+  renderTrust(policy, state.calibration?.payees ?? []);
+  renderLearning(state.calibration ?? {});
   renderPolicy(policy);
 }
 
@@ -159,7 +159,7 @@ function decision(r) {
     </div>
     <div class="trail">${trail}</div>
     <ul class="reasons">${why.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>
-    ${stepUp}${unknown}${paidNote}
+    ${stepUp}${unknown}${paidNote}${feedbackBox(r)}
     <div class="d-foot">
       <span>${time(i.createdAt)} · planned tier ${r.plannedTier} · checks ${usd(r.verificationCostUsd)}${est > r.verificationCostUsd + 1e-9 ? ` (≈${usd(est)} live)` : ""}</span>
       <a href="/r/${encodeURIComponent(i.id)}">View receipt →</a>
@@ -168,6 +168,18 @@ function decision(r) {
 }
 
 const sentence = (t) => (/[.!?]$/.test(t.trim()) ? t.trim() : `${t.trim()}.`);
+
+/** After-the-fact feedback: report a paid payment, or say a block was wrong. */
+function feedbackBox(r) {
+  const id = esc(r.intent.id);
+  if (r.feedback) {
+    const when = r.feedback.at.slice(0, 10);
+    return `<div class="feedback-note ${r.feedback.rating}">${r.feedback.rating === "bad" ? `You reported a problem · ${when}${r.feedback.note ? ` · “${esc(r.feedback.note)}”` : ""}` : `You marked this block as wrong · ${when}`}</div>`;
+  }
+  if (r.status === "approved") return `<div class="feedback-actions"><button class="btn text sm" data-fb="bad" data-id="${id}">Report a problem</button></div>`;
+  if (r.status === "blocked" && r.steps.length) return `<div class="feedback-actions"><button class="btn text sm" data-fb="good" data-id="${id}">This was fine</button></div>`;
+  return "";
+}
 
 function renderAgents(receipts, policy) {
   const agents = state.agents ?? [];
@@ -187,11 +199,27 @@ function renderAgents(receipts, policy) {
   }).join("");
 }
 
-function multiplier(s) {
-  if (!s) return 1;
-  if (s.incidents > 0) return 0.5;
-  if (s.clean < 2) return 1;
-  return Math.min(MAX_MULTIPLIER, 1 + (s.clean - 1) * 0.5);
+// Multipliers come from the server, which applies the 30-day windows.
+const multiplier = (s) => s?.multiplier ?? 1;
+
+/** Reppo's track record against the owner, and what the owner's reports changed. */
+function renderLearning(c) {
+  const r = c.reviewer ?? {};
+  const judged = (r.ownerAgreed ?? 0) + (r.ownerOverruled ?? 0) + (r.missed ?? 0);
+  const verdicts = (r.ship ?? 0) + (r.review ?? 0) + (r.block ?? 0);
+  const watched = (c.payees ?? []).filter((p) => p.ownerApprovesUntil);
+  const strict = (c.agents ?? []).filter((a) => a.multiplier < 1);
+  const rows = [
+    ["Reppo verdicts", verdicts ? `${verdicts} · ${r.ship ?? 0} ship · ${r.review ?? 0} review · ${r.block ?? 0} block` : "none yet"],
+    ["Agreed with you", judged ? `${Math.round(((r.ownerAgreed ?? 0) / judged) * 100)}% of ${judged} you judged` : "nothing to compare yet"],
+    ["You overruled it", String(r.ownerOverruled ?? 0)],
+    ["It shipped, you reported", String(r.missed ?? 0)],
+  ];
+  $("learning").innerHTML = `<dl class="kv">${rows.map(([k, v]) => `<dt>${k}</dt><dd>${esc(v)}</dd>`).join("")}</dl>
+    ${watched.length || strict.length ? `<ul class="list learn-list">
+      ${watched.map((p) => `<li><b class="mono">${esc(p.payee)}</b><div class="agent-task">You reported a payment. You approve its payments until ${esc(p.ownerApprovesUntil.slice(0, 10))}.</div></li>`).join("")}
+      ${strict.map((a) => `<li><b class="mono">${esc(a.agentId)}</b><div class="agent-task">Stricter checks (half thresholds) until 30 days after your report.</div></li>`).join("")}
+    </ul>` : `<p class="small muted learn-hint">Report a problem on a paid payment, or mark a blocked one as fine. Tripwire adjusts at once.</p>`}`;
 }
 
 function renderTrust(policy, stats) {
@@ -201,8 +229,9 @@ function renderTrust(policy, stats) {
     const s = byPayee.get(p);
     const m = multiplier(s);
     const known = policy.knownPayees.some((k) => k.payee === p) || s?.learnedKnown;
+    const watch = s?.ownerApprovesUntil ? ' <span class="tag bad">you approve</span>' : "";
     return `<tr>
-      <td><span class="mono">${esc(p)}</span>${known ? "" : ' <span class="tag">new</span>'}</td>
+      <td><span class="mono">${esc(p)}</span>${known ? "" : ' <span class="tag">new</span>'}${watch}</td>
       <td class="num">${s?.clean ?? 0}/${s?.incidents ?? 0}</td>
       <td class="num ${m > 1 ? "mult-up" : m < 1 ? "mult-down" : ""}">${m}×</td>
       <td class="num">${usd(policy.tier2MinUsd * m)}</td>
@@ -301,12 +330,31 @@ $("mcpJson").textContent = JSON.stringify(
   null, 2,
 );
 
+const CHAINS = { 8453: "Base", 137: "Polygon", 43114: "Avalanche", 5042: "Arc" };
+const short = (s) => (s && s.length > 22 ? `${s.slice(0, 10)}…${s.slice(-8)}` : s);
+
+/** The newest real evidence from each sponsor, taken from this dashboard's own receipts. */
+function liveProof(receipts) {
+  const out = {};
+  for (const r of receipts) {
+    for (const s of r.steps) {
+      if (s.mode !== "live") continue;
+      if (!out.serv && s.tier === 1 && s.detail?.servRequestId) out.serv = `SERV request ${short(s.detail.servRequestId)} · ${(s.detail.servFeatures ?? []).join(", ")}`;
+      if (!out.reppo && s.tier === 2 && s.detail?.evalId && s.detail?.route) out.reppo = `Eval ${short(s.detail.evalId)} · ${s.detail.route}, ${s.detail.score}/100`;
+    }
+    const p = r.payment;
+    if (!out.kite && p?.mode === "live" && p.state === "paid") out.kite = `Paid ${usd(p.amountUsd ?? r.intent.amountUsd)} on ${CHAINS[p.chainId] ?? "Kite"}${p.txHash ? ` · tx ${short(p.txHash)}` : ""}`;
+  }
+  return out;
+}
+
 function renderIntegrations(modes) {
   const items = [
-    ["serv", "SERV Reasoning", "Tier 1 task check with PromptGuard and Shadow Agent on every call. Also compiles your plain-English rules into strict policy.", "OpenServ"],
-    ["reppo", "Reppo Eval API", "Tier 2. Independent network verdict on larger or flagged payments: proceed, re-evaluate or block.", "Reppo"],
-    ["kite", "Kite Agent Passport", "Payments, the service directory check (ksearch), and a one-shot passkey session that the approved payment goes through.", "Kite"],
+    ["serv", "SERV Reasoning", "Tier 1 task check through SERV's reasoning graphs (Multipath, audited by Kronos), with PromptGuard and Shadow Agent on every call. Also compiles your plain-English rules into strict policy.", "OpenServ"],
+    ["reppo", "Reppo Eval API", "Tier 2. A panel of independent evaluators scores larger or flagged payments and routes them ship, review or block. Its track record against your decisions is kept.", "Reppo"],
+    ["kite", "Kite Agent Passport", "Pays from your allowance with idempotency keys, checks payees in Kite's service catalog, and asks for your passkey through a session capped at one payment.", "Kite"],
   ];
+  const proof = liveProof(state?.receipts ?? []);
   $("integrations").innerHTML = items.map(([k, name, body]) => {
     const v = modes[k];
     const cls = modeClass(v);
@@ -315,6 +363,7 @@ function renderIntegrations(modes) {
       <div class="top"><h3 class="h3">${name}</h3><span class="status ${cls}">${label}</span></div>
       <p>${body}</p>
       <span class="small mono muted">${esc(v)}</span>
+      ${proof[k] ? `<div class="proof"><span class="label">Last live proof</span><span class="mono">${esc(proof[k])}</span></div>` : ""}
     </div>`;
   }).join("");
 }
@@ -326,6 +375,18 @@ $("feed").addEventListener("click", async (e) => {
   b.closest(".actions").querySelectorAll("button").forEach((x) => (x.disabled = true));
   const res = await api(`/api/stepup/${encodeURIComponent(b.dataset.id)}`, { method: "POST", body: JSON.stringify({ answer: b.dataset.answer }) });
   if (!res.ok) alert((await res.json()).error);
+});
+
+// Feedback teaches calibration and Reppo's track record.
+$("feed").addEventListener("click", async (e) => {
+  const b = e.target.closest("button[data-fb]");
+  if (!b) return;
+  const bad = b.dataset.fb === "bad";
+  if (bad && !confirm("Report this payment as a problem? For 30 days you'll approve this payee's payments yourself, and this agent gets stricter checks.")) return;
+  b.disabled = true;
+  const res = await api(`/api/receipts/${encodeURIComponent(b.dataset.id)}/feedback`, { method: "POST", body: JSON.stringify({ rating: b.dataset.fb }) });
+  if (!res.ok) alert((await res.json()).error);
+  refresh();
 });
 
 // Payments Kite couldn't confirm: recheck (same idempotency key, never pays twice) or settle by hand.
