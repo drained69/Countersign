@@ -149,6 +149,7 @@ cp .env.example .env
 | `PORT` / `HOST` | `8787` / `127.0.0.1` | Where the server listens. |
 | `STATE_FILE` | `data/state.json`, live: `data/live-state.json` | Where receipts, calibration and applied rules are saved (atomic writes, mode 600). |
 | `PUBLIC_DEMO` | — | `true` opens the demo dashboard to anyone (refused with `KITE_MODE=kpass`). Calls that spend SERV or Reppo credit are rate-limited per visitor. |
+| `PUBLIC_LIVE` | — | `true` lets anyone trigger ONE server-defined capped real payment and watch the live feed; policy, approvals and marking payments stay behind `TRIPWIRE_OWNER_TOKEN`. Needs `KITE_MODE=kpass`. Visitors spend your real Kite allowance — keep the policy allowance tiny. |
 | `PUBLIC_RATE_LIMIT` | `40` | Public demo: checked payments and policy compiles per visitor address per hour. |
 | `TRUST_PROXY` | — | `true` behind a proxy (Railway sets it in the image): rate limits use `X-Real-IP` / `X-Forwarded-For`. |
 | `REPPO_DAILY_LIMIT` | — | Most live Reppo evaluations per UTC day. Over it, the demo uses the labelled stand-in and live mode hands the payment to you. |

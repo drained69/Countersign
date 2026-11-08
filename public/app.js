@@ -414,9 +414,10 @@ $("filters").addEventListener("click", (e) => {
   render();
 });
 
+let publicLive = false;
 $("next").onclick = async () => {
   $("next").disabled = true;
-  const res = await api("/api/demo/next", { method: "POST" });
+  const res = await api(publicLive ? "/api/public/pay" : "/api/demo/next", { method: "POST" });
   if (!res.ok) alert((await res.json()).error);
 };
 $("reset").onclick = async () => {
@@ -506,6 +507,13 @@ matchMedia("(prefers-color-scheme: dark)").addEventListener("change", drawChart)
 (async function boot() {
   const session = await (await fetch("/api/session")).json();
   $("logout").hidden = !session.authRequired;
+  publicLive = Boolean(session.publicLive);
+  if (publicLive) {
+    $("next").textContent = "Spend a real payment";
+    $("reset").hidden = true;
+    const hint = $("demoHint");
+    if (hint) hint.textContent = "Live \u2014 real money from a shared $0.40/week allowance. Each click pays agent402.tools a few hundredths of a cent through Kite, and you watch the ladder decide.";
+  }
   if (session.authRequired && session.role !== "owner") return showLogin();
   await refresh();
   replay();

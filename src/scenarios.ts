@@ -138,3 +138,23 @@ export function syntheticWeek(week: number, seed = 7): LabelledIntent[] {
   );
   return out;
 }
+
+/**
+ * The one payment a PUBLIC_LIVE visitor can trigger: a tiny, real, Kite-payable call to a known
+ * x402 merchant. Server-defined so the public can never redirect the owner's money to an arbitrary
+ * payee. A fresh requestKey each time so repeated clicks are not collapsed as duplicates.
+ */
+export function publicPayIntent(): PaymentIntent {
+  return intent({
+    agentId: "public-visitor",
+    agentTask: "Pick random numbers for a community giveaway draw",
+    payee: "agent402.tools",
+    payeeName: "agent402 tools random",
+    amountUsd: 0.001,
+    category: "random numbers",
+    purpose: "Three random numbers from 1 to 100 for the giveaway draw",
+    url: "https://agent402.tools/api/random?min=1&max=100&count=3",
+    method: "GET",
+    requestKey: `public-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+  });
+}

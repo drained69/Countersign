@@ -14,7 +14,7 @@ import { randomUUID } from "node:crypto";
 import { COOKIE, LoginLimiter, identify, loadAuth, same, sameOrigin, sessionValue, type Caller } from "./auth.ts";
 import { Engine } from "./engine.ts";
 import { runReplay, type WeekResult } from "./replay.ts";
-import { AGENTS, demoScript } from "./scenarios.ts";
+import { AGENTS, demoScript, publicPayIntent } from "./scenarios.ts";
 import { validateIntent } from "./validate.ts";
 import type { PaymentIntent, Policy, Receipt } from "./types.ts";
 
@@ -35,6 +35,11 @@ const loopback = /^(127\.\d+\.\d+\.\d+|::1|localhost)$/.test(host);
 const PUBLIC_DEMO = process.env.PUBLIC_DEMO === "true";
 /** TRUST_PROXY=true: take the client address from the proxy (Railway, Fly, nginx) for rate limits. */
 const TRUST_PROXY = process.env.TRUST_PROXY === "true";
+/** PUBLIC_LIVE=true: anyone can trigger ONE server-defined capped real payment and watch the feed.
+ *  Admin (policy, approvals, marking payments) still needs the owner token. */
+const PUBLIC_LIVE = process.env.PUBLIC_LIVE === "true";
+/** The agent identity every anonymous visitor acts as in PUBLIC_LIVE mode. */
+const PUBLIC_VISITOR = "public-visitor";
 
 function fail(msg: string): never {
   console.error(`\nTripwire can't start: ${msg}\n`);
@@ -48,10 +53,13 @@ try {
   fail((err as Error).message);
 }
 if (PUBLIC_DEMO && LIVE) fail("PUBLIC_DEMO=true is only for the demo: it opens the dashboard to anyone, which must never control real money.");
+if (PUBLIC_LIVE && !LIVE) fail("PUBLIC_LIVE=true needs real payments: set KITE_MODE=kpass.");
+if (PUBLIC_LIVE && PUBLIC_DEMO) fail("Set PUBLIC_DEMO or PUBLIC_LIVE, not both.");
 if (!auth.ownerToken && (LIVE || (!loopback && !PUBLIC_DEMO))) {
   fail(`${LIVE ? "KITE_MODE=kpass moves real money" : `HOST=${host} is reachable beyond this machine`}, so set TRIPWIRE_OWNER_TOKEN (24+ random characters, e.g. \`openssl rand -hex 24\`).`);
 }
-if (LIVE && !auth.agentKeys.size) fail("Live mode needs at least one agent key: TRIPWIRE_AGENT_KEYS=agent-id:key (24+ characters each).");
+if (LIVE && !PUBLIC_LIVE && !auth.agentKeys.size) fail("Live mode needs at least one agent key: TRIPWIRE_AGENT_KEYS=agent-id:key (24+ characters each).");
+if (PUBLIC_LIVE && !auth.ownerToken) fail("PUBLIC_LIVE still needs TRIPWIRE_OWNER_TOKEN: it locks admin (policy, approvals) away from the public.");
 if (cfg.kite?.payFrom === "session" && !cfg.kite.sessionId) fail("KITE_PAY_FROM=session needs KITE_SESSION_ID.");
 
 /** Agents shown on the dashboard and accepted by the policy compiler. Live: the ones with API keys. */
@@ -236,14 +244,17 @@ const clientIp = (req: IncomingMessage) => {
 };
 /** Public demo: calls that spend SERV or Reppo credit, per visitor address. */
 const costlyLimiter = new LoginLimiter(Number(process.env.PUBLIC_RATE_LIMIT ?? 40), 60 * 60_000);
-const COSTLY = new Set(["/api/intents", "/api/demo/next", "/api/policy/compile"]);
+const COSTLY = new Set(["/api/intents", "/api/demo/next", "/api/policy/compile", "/api/public/pay"]);
 const cookieFlags = (req: IncomingMessage) =>
   `HttpOnly; SameSite=Strict; Path=/; Max-Age=${30 * 24 * 3600}${process.env.COOKIE_SECURE === "true" || req.headers["x-forwarded-proto"] === "https" || PUBLIC_URL.startsWith("https:") ? "; Secure" : ""}`;
 
 /** Who is calling. In the public demo every visitor gets the demo owner's view (no real money exists there). */
 const caller = (req: IncomingMessage): Caller => {
   const who = identify(req, auth);
-  return PUBLIC_DEMO && who.role === "anon" ? { role: "owner" } : who;
+  if (who.role !== "anon") return who; // a real owner token or agent key always wins
+  if (PUBLIC_DEMO) return { role: "owner" }; // demo dashboard, no real money
+  if (PUBLIC_LIVE) return { role: "agent", agentId: PUBLIC_VISITOR }; // can pay via the button, never admin
+  return who;
 };
 
 const server = createServer(async (req, res) => {
@@ -254,7 +265,7 @@ const server = createServer(async (req, res) => {
     // ---------- Public: pages, login ----------
     if (method === "GET" && path === "/api/session") {
       const who = caller(req);
-      return json(res, 200, { authRequired: Boolean(auth.ownerToken) && !PUBLIC_DEMO, role: who.role, live: LIVE, publicDemo: PUBLIC_DEMO });
+      return json(res, 200, { authRequired: Boolean(auth.ownerToken) && !PUBLIC_DEMO && !PUBLIC_LIVE, role: who.role, live: LIVE, publicDemo: PUBLIC_DEMO, publicLive: PUBLIC_LIVE });
     }
     if (method === "POST" && path === "/api/login") {
       if (!auth.ownerToken || PUBLIC_DEMO) return json(res, 200, { ok: true });
@@ -280,7 +291,7 @@ const server = createServer(async (req, res) => {
 
     // ---------- Everything else needs a caller ----------
     const who: Caller = caller(req);
-    if (PUBLIC_DEMO && method === "POST" && COSTLY.has(path)) {
+    if ((PUBLIC_DEMO || PUBLIC_LIVE) && method === "POST" && COSTLY.has(path)) {
       if (costlyLimiter.blocked(clientIp(req))) return json(res, 429, { error: "Demo limit reached for now. Try again in an hour, or run Tripwire locally." });
       costlyLimiter.fail(clientIp(req));
     }
@@ -288,6 +299,17 @@ const server = createServer(async (req, res) => {
     if (method !== "GET" && !req.headers.authorization && !sameOrigin(req)) return json(res, 403, { error: "Cross-site request refused." });
     const owner = who.role === "owner";
     const ownerOnly = () => json(res, 403, { error: "Only the owner can do this." });
+    const publicVisitor = PUBLIC_LIVE && who.role === "agent" && who.agentId === PUBLIC_VISITOR;
+
+    // Public live demo: a visitor can trigger ONE server-defined capped payment, and nothing else that spends.
+    if (publicVisitor) {
+      if (method === "POST" && path === "/api/public/pay") {
+        const pi = publicPayIntent();
+        engine.decide(pi).catch((e) => console.error("decide failed", e));
+        return json(res, 202, { id: pi.id, receipt: `/api/receipts/${pi.id}` });
+      }
+      if (method === "POST" && path === "/api/intents") return json(res, 403, { error: "This public demo only runs its own test payment. Use the button on the page." });
+    }
 
     // Agents submit intents here. Responds immediately; the decision streams over /api/events.
     if (method === "POST" && path === "/api/intents") {
@@ -319,7 +341,9 @@ const server = createServer(async (req, res) => {
       return json(res, 200, agentPolicy(who.role === "agent" ? who.agentId : (url.searchParams.get("agentId") ?? "owner")));
     }
 
-    if (!owner) return ownerOnly();
+    // Public visitors may READ the live feed (state, events); every mutation stays owner-only.
+    const publicRead = publicVisitor && method === "GET" && (path === "/api/state" || path === "/api/events");
+    if (!owner && !publicRead) return ownerOnly();
 
     // ---------- Owner ----------
     if (method === "GET" && path === "/api/state") return json(res, 200, state());
@@ -432,7 +456,7 @@ const server = createServer(async (req, res) => {
 server.listen(port, host, () => {
   console.log(`Tripwire on http://${host.includes(":") ? `[${host}]` : host}:${port}${PUBLIC_URL.startsWith("http://127") ? "" : ` (public: ${PUBLIC_URL})`}`);
   console.log("Modes:", describeModes(cfg));
-  console.log(PUBLIC_DEMO ? "Public demo: open to anyone, rate-limited, no real money." : auth.ownerToken ? `Owner login required. ${auth.agentKeys.size} agent key(s) loaded.` : "Open local demo: no login (loopback only).");
+  console.log(PUBLIC_LIVE ? "Public LIVE: anyone can trigger the capped test payment; admin stays behind the owner token." : PUBLIC_DEMO ? "Public demo: open to anyone, rate-limited, no real money." : auth.ownerToken ? `Owner login required. ${auth.agentKeys.size} agent key(s) loaded.` : "Open local demo: no login (loopback only).");
 });
 
 // Finish the in-flight write before exiting.
