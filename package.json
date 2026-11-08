@@ -1,0 +1,15 @@
+{
+  "name": "countersign",
+  "version": "0.1.0",
+  "description": "Tiered co-signer for Kite agent allowances: code rules -> SERV reasoning -> Reppo verdict -> human passkey step-up.",
+  "type": "module",
+  "license": "MIT",
+  "engines": { "node": ">=23.6" },
+  "scripts": {
+    "start": "node src/server.ts",
+    "demo": "node scripts/demo.ts",
+    "replay": "node scripts/replay.ts",
+    "mcp": "node src/mcp.ts",
+    "test": "node --test --test-timeout=30000 \"test/**/*.test.ts\""
+  }
+}
