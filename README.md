@@ -45,6 +45,8 @@ Allowances let your agents spend without asking. Tripwire makes sure they should
 
 Tripwire sits between your agents and their Kite allowance. Every payment climbs a ladder of checks that gets stricter as more money is at risk, from free code rules up to the owner's passkey, and every decision comes with a receipt showing what ran, what it cost and why.
 
+**Live demo:** [tripwirev1.up.railway.app](https://tripwirev1.up.railway.app) — press **Spend a real payment** to send a few hundredths of a cent through the full ladder (SERV, Reppo and a real Kite payment) from a shared, capped allowance. The dashboard's admin actions stay behind the owner token.
+
 Built for the **OpenServ SERV Hackathon, Edition 02 (Kite track)**.
 
 ## Features
