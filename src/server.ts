@@ -14,7 +14,7 @@ import { randomUUID } from "node:crypto";
 import { COOKIE, LoginLimiter, identify, loadAuth, same, sameOrigin, sessionValue, type Caller } from "./auth.ts";
 import { Engine } from "./engine.ts";
 import { runReplay, type WeekResult } from "./replay.ts";
-import { AGENTS, demoScript, publicPayIntent } from "./scenarios.ts";
+import { AGENTS, demoScript, publicPayIntent, PUBLIC_TEST_PAYMENT } from "./scenarios.ts";
 import { validateIntent } from "./validate.ts";
 import type { PaymentIntent, Policy, Receipt } from "./types.ts";
 
@@ -265,7 +265,15 @@ const server = createServer(async (req, res) => {
     // ---------- Public: pages, login ----------
     if (method === "GET" && path === "/api/session") {
       const who = caller(req);
-      return json(res, 200, { authRequired: Boolean(auth.ownerToken) && !PUBLIC_DEMO && !PUBLIC_LIVE, role: who.role, live: LIVE, publicDemo: PUBLIC_DEMO, publicLive: PUBLIC_LIVE });
+      return json(res, 200, {
+        authRequired: Boolean(auth.ownerToken) && !PUBLIC_DEMO && !PUBLIC_LIVE,
+        role: who.role,
+        live: LIVE,
+        publicDemo: PUBLIC_DEMO,
+        publicLive: PUBLIC_LIVE,
+        ...(PUBLIC_LIVE ? { testPayment: PUBLIC_TEST_PAYMENT } : {}),
+        ...(who.role === "agent" ? { agentId: who.agentId } : {}),
+      });
     }
     if (method === "POST" && path === "/api/login") {
       if (!auth.ownerToken || PUBLIC_DEMO) return json(res, 200, { ok: true });

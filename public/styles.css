@@ -496,3 +496,86 @@ textarea:focus { outline: 2px solid var(--lime); outline-offset: 1px; border-col
 .learn-hint { margin: 0; padding: 0 24px 18px; }
 .proof { margin-top: auto; padding-top: 12px; border-top: 1px dashed var(--line); display: grid; gap: 6px; }
 .proof .mono { font-size: 12px; color: var(--ink-2); overflow-wrap: anywhere; }
+
+/* Shared navigation and keyboard affordances */
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.hero :focus-visible, .stepup :focus-visible, .band :focus-visible { outline-color: var(--lime); }
+.skip-link { position: fixed; top: 8px; left: 8px; z-index: 60; transform: translateY(-150%); padding: 8px 14px; border-radius: 8px; background: var(--btn); color: var(--btn-ink); }
+.skip-link:focus { transform: none; }
+.theme-toggle { width: 44px; height: 44px; flex: none; }
+.btn[aria-disabled="true"] { opacity: .55; cursor: not-allowed; }
+.hero-strip a { color: var(--on-deep); text-underline-offset: 4px; }
+.hero-hint { color: var(--on-deep-2); }
+.hero-hint:empty { display: none; }
+.hero-hint a { color: var(--lime); text-underline-offset: 3px; }
+.login-gate { overflow: auto; overscroll-behavior: contain; }
+.login-card input { min-width: 0; }
+.table-scroll, .codeblock, .docs > *, .receipt-grid > * { min-width: 0; }
+.decision, .receipt-grid, .login-card, .policy-grid { overflow-wrap: anywhere; }
+.pill { white-space: normal; line-height: 1.25; }
+.pill::before { flex: none; }
+.meter > i { background: var(--accent); }
+.metric .value { white-space: normal; font-variant-numeric: tabular-nums; }
+#retryReceipt { margin-top: 16px; }
+
+/* Make the overview and feed the first working area below the hero. */
+.dashboard .hero-grid { padding-block: clamp(28px, 4vw, 54px) clamp(24px, 3vw, 36px); }
+.dashboard .hero-copy .display { font-size: clamp(38px, 5.2vw, 68px); text-wrap: balance; margin-top: 16px; }
+.dashboard .hero-card .lead { max-width: 46ch; margin-top: 16px; }
+.dashboard .hero-actions { margin-top: 22px; }
+.dashboard .hero-visual { padding-block: 22px; background-color: color-mix(in srgb, var(--deep) 72%, var(--lime)); }
+.dashboard .hero-strip { padding-block: 12px; }
+.dashboard .section.tight { padding-top: 14px; }
+.dashboard .metric { padding: clamp(12px, 2vw, 20px); }
+.dashboard .metric .value { margin-top: 8px; }
+.dashboard .board-section { padding-top: clamp(34px, 5vw, 64px); }
+.dashboard .board-section .section-head { margin-bottom: 20px; align-items: end; }
+.dashboard .board-section .h2 { font-size: clamp(30px, 4vw, 45px); margin-top: 10px; }
+.dashboard .card-head { gap: 10px; }
+.feed-status, .feed-more { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px clamp(14px, 2vw, 24px); background: var(--bg-soft); color: var(--muted); font-size: 13px; }
+.feed-status { min-height: 38px; border-bottom: 1px solid var(--line); }
+.feed-more { border-top: 1px solid var(--line); border-radius: 0 0 var(--radius-lg) var(--radius-lg); }
+.action-status { margin: 0; padding: 10px clamp(14px, 2vw, 24px); color: var(--ink); background: var(--accent-soft); }
+.tabs button { min-height: 38px; }
+.tabs button:hover:not([aria-pressed="true"]) { background: var(--card); }
+.decision:focus { outline-offset: -3px; }
+.d-amount { font-variant-numeric: tabular-nums; }
+.d-foot a { display: inline-flex; align-items: center; min-height: 34px; text-decoration: underline; text-underline-offset: 4px; }
+
+@media (max-width: 640px) {
+  .dashboard .hero-copy .display br { display: none; }
+  .dashboard .hero-strip > span { display: none; }
+  .dashboard .hero-actions { gap: 8px; }
+  .dashboard .hero-actions .btn { white-space: normal; text-align: left; line-height: 1.25; }
+  .dashboard .hero-actions .btn::after { flex: none; }
+  .dashboard .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .dashboard .metric .value { font-size: 25px; }
+  .dashboard .metric .value small { font-size: 13px; }
+  .dashboard .metric .split { gap: 3px 9px; margin-top: 8px; font-size: 12px; }
+  .dashboard .metric .label { letter-spacing: .05em; line-height: 1.3; }
+  .dashboard .card-head, .dashboard .decision, .dashboard .card-pad { padding-inline: 14px; }
+  .tabs { border-radius: 16px; }
+  .tabs button { padding-inline: 9px; min-height: 40px; }
+  .nav .container { padding-inline: 12px; gap: 10px; }
+  .nav .brand { gap: 6px; }
+  .nav .wordmark { font-size: 18px; }
+  .nav-links { gap: 10px; }
+  .nav-right { gap: 2px; }
+  .nav-right .btn.text { padding-inline: 4px; font-size: 12px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+}
+@media (max-width: 440px) {
+  .dashboard .nav .brand .wordmark { display: none; }
+  .dashboard .nav .brand { padding-block: 8px; }
+  .dashboard .nav .brand::after { content: "Tripwire"; font-size: 15px; font-weight: 700; }
+  .dashboard .nav .owner-entry { white-space: normal; line-height: 1.15; max-width: 48px; }
+}
+.integ, .band-actions { min-width: 0; }
+.integ .top { flex-wrap: wrap; }
+.integ .status { white-space: normal; line-height: 1.25; }
+@media (max-width: 440px) {
+  .dashboard .nav .container { gap: 8px; }
+  .dashboard .nav-links { gap: 8px; }
+}

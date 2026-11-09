@@ -29,15 +29,21 @@
     return out.map((x) => `<span>${esc(x)}</span>`).join("");
   }
 
+  let loaded = false;
   async function load() {
-    const res = await fetch(`/api/receipts/${encodeURIComponent(id)}`);
+    $("retryReceipt").hidden = true;
+    const res = await fetch(`/api/receipts/${encodeURIComponent(id)}`, { signal: AbortSignal.timeout(15000) });
     if (res.status === 401) return location.replace("/");
-    if (!res.ok) {
+    if (res.status === 404) {
       $("amount").textContent = "Receipt not found";
       $("payee").textContent = "It may have been cleared by a demo reset.";
+      $("receiptDetails").hidden = true;
       return;
     }
+    if (!res.ok) throw new Error("Receipt request failed");
     const r = await res.json();
+    loaded = true;
+    $("receiptDetails").hidden = false;
     const i = r.intent;
     document.title = `${usd(i.amountUsd)} to ${i.payeeName} · Tripwire receipt`;
     $("eyebrow").innerHTML = `<i></i>Receipt · ${esc(i.agentId)}`;
@@ -89,6 +95,14 @@
       i.vendorText ? block("Vendor text · untrusted, never obeyed", `<span class="mono">${esc(i.vendorText)}</span>`, true) : "",
     ].join("");
     $("raw").textContent = JSON.stringify(r, null, 2);
-    if (r.status.startsWith("pending") || r.status === "paying") setTimeout(load, 2000);
+    if (r.status.startsWith("pending") || r.status === "paying") setTimeout(refresh, 2000);
   }
-  load();
+  function refresh() {
+    load().catch(() => {
+      if (!loaded) $("amount").textContent = "Couldn’t load receipt";
+      $("status").textContent = loaded ? "Couldn’t refresh receipt" : "";
+      $("retryReceipt").hidden = false;
+    });
+  }
+  $("retryReceipt").onclick = refresh;
+  refresh();

@@ -144,13 +144,15 @@ export function syntheticWeek(week: number, seed = 7): LabelledIntent[] {
  * x402 merchant. Server-defined so the public can never redirect the owner's money to an arbitrary
  * payee. A fresh requestKey each time so repeated clicks are not collapsed as duplicates.
  */
+export const PUBLIC_TEST_PAYMENT = { payee: "agent402.tools", amountUsd: 0.001 } as const;
+
 export function publicPayIntent(): PaymentIntent {
   return intent({
     agentId: "public-visitor",
     agentTask: "Pick random numbers for a community giveaway draw",
-    payee: "agent402.tools",
+    payee: PUBLIC_TEST_PAYMENT.payee,
     payeeName: "agent402 tools random",
-    amountUsd: 0.001,
+    amountUsd: PUBLIC_TEST_PAYMENT.amountUsd,
     category: "random numbers",
     purpose: "Three random numbers from 1 to 100 for the giveaway draw",
     url: "https://agent402.tools/api/random?min=1&max=100&count=3",

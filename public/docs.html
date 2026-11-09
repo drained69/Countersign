@@ -13,18 +13,20 @@
   <script src="/shell.js"></script>
 </head>
 <body>
+<a class="skip-link" href="#main">Skip to content</a>
 <header class="nav">
   <div class="container">
     <a class="brand" href="/"><svg class="mark" viewBox="0 0 28 28" aria-hidden="true"><rect width="28" height="28" rx="7"/><path d="M4.5 17.5h5.5l2.6-7 3.2 10 2.6-6.5h5.1"/></svg><span class="wordmark">Tripwire</span></a>
     <nav class="nav-links" aria-label="Primary">
       <a href="/">Dashboard</a>
-      <a href="/#replay" class="hide-xs">Replay</a>
+      <a href="/#activity" class="hide-xs">Activity</a>
       <a href="/docs" aria-current="page">Docs</a>
     </nav>
     <div class="nav-right"><button class="theme-toggle" data-theme-toggle aria-label="Toggle dark mode"></button></div>
   </div>
 </header>
 
+<main id="main" tabindex="-1">
 <section class="hero">
   <div class="hero-card compact">
     <span class="live-label"><i></i>Documentation</span>
@@ -583,6 +585,7 @@ interface StepRecord {
   </article>
 </div>
 
+</main>
 <footer class="footer">
   <div class="footer-card">
     <div class="footer-grid">

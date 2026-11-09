@@ -18,7 +18,11 @@
 
   document.addEventListener("DOMContentLoaded", () => {
     for (const b of document.querySelectorAll("[data-theme-toggle]")) {
-      const paint = () => (b.innerHTML = isDark() ? SUN : MOON);
+      const paint = () => {
+        const dark = isDark();
+        b.innerHTML = dark ? SUN : MOON;
+        b.setAttribute("aria-pressed", String(dark));
+      };
       paint();
       b.addEventListener("click", () => {
         root.dataset.theme = isDark() ? "light" : "dark";
@@ -32,7 +36,19 @@
       const btn = e.target.closest(".copy");
       if (!btn) return;
       const text = btn.closest(".codeblock")?.querySelector("pre")?.innerText ?? "";
-      try { await navigator.clipboard.writeText(text); btn.textContent = "Copied"; } catch { btn.textContent = "Select & copy"; }
+      try {
+        await navigator.clipboard.writeText(text);
+        btn.textContent = "Copied";
+      } catch {
+        const pre = btn.closest(".codeblock")?.querySelector("pre");
+        if (pre) {
+          const range = document.createRange();
+          range.selectNodeContents(pre);
+          getSelection()?.removeAllRanges();
+          getSelection()?.addRange(range);
+        }
+        btn.textContent = "Text selected";
+      }
       setTimeout(() => (btn.textContent = "Copy"), 1400);
     });
   });

@@ -8,3 +8,5 @@ policy.json
 .DS_Store
 *.log
 coverage/
+video/node_modules/
+video/out/
