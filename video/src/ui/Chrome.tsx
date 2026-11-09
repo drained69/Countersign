@@ -37,7 +37,7 @@ export const Cursor: React.FC<{ x: number; y: number; t: number; clicks: number[
           border: `${3 * scale}px solid #a3e36a`, background: "#a3e36a33", transform: `scale(${0.15 + ripple})`, opacity: 1 - ripple,
         }} />
       ) : null}
-      <svg width={30 * scale} height={30 * scale} viewBox="0 0 24 24" style={{ position: "absolute", left: -3 * scale, top: -2 * scale, transform: `scale(${1 - 0.14 * press})`, transformOrigin: "3px 2px", filter: "drop-shadow(0 2px 3px #0005)" }}>
+      <svg width={30 * scale} height={30 * scale} viewBox="0 0 24 24" style={{ position: "absolute", maxWidth: "none", left: -3 * scale, top: -2 * scale, transform: `scale(${1 - 0.14 * press})`, transformOrigin: "3px 2px", filter: "drop-shadow(0 2px 3px #0005)" }}>
         <path d="M3 2 L3 19 L7.6 14.8 L10.6 21.6 L13.6 20.3 L10.7 13.6 L17 13.6 Z" fill="#13271c" stroke="#fff" strokeWidth={1.6} strokeLinejoin="round" />
       </svg>
     </div>

@@ -13,6 +13,6 @@ mkdirSync(`${root}out/stills`, { recursive: true });
 for (const s of secs) {
   const frame = Math.min(composition.durationInFrames - 1, Math.round(Number(s) * composition.fps));
   const output = `${root}out/stills/${id.toLowerCase()}-${String(s).padStart(5, "0")}.png`;
-  await renderStill({ serveUrl, composition, frame, output, scale: 1 });
+  await renderStill({ serveUrl, composition, frame, output, scale: 1, timeoutInMilliseconds: 60000, logLevel: "warn", onBrowserLog: (l) => console.log("browser:", l.type, l.text.slice(0, 300)) });
   console.log(output);
 }

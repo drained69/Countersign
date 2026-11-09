@@ -32,7 +32,7 @@ export const Receipt: React.FC<{ t: number; narrow: boolean }> = ({ t, narrow })
               <ol className="timeline">
                 {r.steps.map((s, i) => {
                   const k = prog(t, NODE_AT[i], 0.45);
-                  const cost = `${usd(0)}${s.mode === "mock" && s.liveCostUsd ? ` · ≈${usd(s.liveCostUsd)} live` : ""}`;
+                  const cost = usd(s.costUsd ?? 0);
                   return (
                     <li key={s.tier} style={{ opacity: 0.25 + 0.75 * k }} data-anchor={`r-step-${i}`}>
                       <span className="node" style={{ background: `var(--${s.kind})`, transform: `scale(${0.7 + 0.3 * k})` }}>{s.tier}</span>
@@ -59,7 +59,7 @@ export const Receipt: React.FC<{ t: number; narrow: boolean }> = ({ t, narrow })
                 <dt>Status</dt><dd>{UI.status.blocked}</dd>
                 <dt>Amount</dt><dd>{usd(r.amountUsd)}</dd>
                 <dt>Category</dt><dd>{r.category}</dd>
-                <dt>Cost of checks</dt><dd>$0.00</dd>
+                <dt>Cost of checks</dt><dd>{usd(r.steps.reduce((a, s) => a + (s.costUsd ?? 0), 0))}</dd>
                 <dt>Kite payment</dt><dd>Not paid</dd>
                 <dt>Requested</dt><dd>11/9/2026, 10:08:34 AM</dd>
                 <dt>Decided</dt><dd>11/9/2026, 10:09:09 AM</dd>

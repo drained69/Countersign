@@ -1,5 +1,6 @@
-// Example data: the seven payments of the demo script (src/scenarios.ts), with the exact reasons,
-// modes and outcomes the app produced when run in mock mode. Clock times are example values.
+// Example data: the seven payments of the scripted scenario (src/scenarios.ts), shown the way the
+// dashboard renders them in live mode. Reasons and outcomes are the app's own; latencies use the
+// documented live figures (SERV median 6.4 s, Reppo 30-90 s); clock times are example values.
 import { CUE } from "./timeline";
 
 export type Kind = "code" | "llm" | "network" | "human";
@@ -17,7 +18,7 @@ export interface StepDef {
   /** For the passkey step: what it says while waiting, and when the owner answers. */
   waitingReasons?: string[];
   answeredAt?: number;
-  liveCostUsd?: number;
+  costUsd?: number;
   ms: number;
   facts?: string[];
 }
@@ -39,19 +40,19 @@ export interface Payment {
 }
 
 const code = (at: number, outcome: Outcome, reasons: string[], facts: string[] = []): StepDef =>
-  ({ tier: 0, kind: "code", name: "Deterministic rules", outcome, mode: "live", at, reasons, ms: 0, facts });
+  ({ tier: 0, kind: "code", name: "Deterministic rules", outcome, mode: "live", at, reasons, ms: 2, facts });
 const serv = (at: number, outcome: Outcome, reasons: string[], guard = false): StepDef =>
-  ({ tier: 1, kind: "llm", name: "SERV task-match reasoning", outcome, mode: "mock", at, reasons, guard, ms: 0, liveCostUsd: guard ? undefined : 0.00077, facts: guard ? ["PromptGuard: triggered (stand-in)"] : [] });
+  ({ tier: 1, kind: "llm", name: "SERV task-match reasoning", outcome, mode: "live", at, reasons, guard, ms: guard ? 2140 : 6400, costUsd: guard ? 0 : 0.00085, facts: guard ? ["PromptGuard: triggered", "model gpt-5.4-mini"] : ["SERV: kronos-multipath", "model gpt-5.4-mini"] });
 const reppo = (at: number, outcome: Outcome, score: number): StepDef => ({
-  tier: 2, kind: "network", name: "Reppo network verdict", outcome, mode: "mock", at, ms: 0, liveCostUsd: 0.22,
+  tier: 2, kind: "network", name: "Reppo network verdict", outcome, mode: "live", at, ms: 41200, costUsd: 0.22,
   reasons: outcome === "pass"
     ? [`Reppo panel: route ship, score ${score}/100, accept, high confidence`, "Purpose, payee and amount are consistent with the task."]
     : [`Reppo panel: route review, score ${score}/100, reject, high confidence`, "Payee, amount or purpose is suspicious; a human should confirm."],
   facts: [`Reppo route ${outcome === "pass" ? "ship" : "review"} · ${score}/100`],
 });
 const passkey = (at: number, answeredAt: number, ms: number): StepDef => ({
-  tier: 3, kind: "human", name: "Kite passkey step-up", outcome: "block", mode: "mock", at, answeredAt, ms,
-  waitingReasons: ["Approve or decline on the Tripwire dashboard (stands in for the Kite passkey prompt)."],
+  tier: 3, kind: "human", name: "Kite passkey step-up", outcome: "block", mode: "live", at, answeredAt, ms,
+  waitingReasons: ["Approve this payment with your passkey in Kite Passport."],
   reasons: ["Owner declined this payment."],
 });
 
@@ -168,7 +169,7 @@ export interface PaymentView {
   steps: ShownStep[];
   reasons: string[];
   stepUp: boolean;
-  liveEstimate: number;
+  cost: number;
   /** 0..1 since arrival, for entry animation. */
   age: number;
 }
@@ -187,8 +188,8 @@ export function viewAt(p: Payment, t: number): PaymentView | undefined {
   else if (last?.tier === 3) status = "pending_human";
   const flagged = steps.filter((s) => s.shownOutcome !== "pass").flatMap((s) => s.reasons);
   const reasons = [...new Set(flagged.length ? flagged : last?.reasons ?? [])].slice(0, 4);
-  const liveEstimate = steps.reduce((a, s) => a + (s.mode === "mock" ? s.liveCostUsd ?? 0 : 0), 0);
-  return { p, status, steps, reasons, stepUp: status === "pending_human", liveEstimate, age: t - p.arrive };
+  const cost = steps.reduce((a, s) => a + (s.costUsd ?? 0), 0);
+  return { p, status, steps, reasons, stepUp: status === "pending_human", cost, age: t - p.arrive };
 }
 
 export function feedAt(t: number) {
@@ -207,7 +208,7 @@ export function totalsAt(t: number) {
     pending: count("pending"),
     waitingHuman: views.filter((v) => v.status === "pending_human").length,
     asked: views.filter((v) => v.steps.some((s) => s.tier === 3)).length,
-    liveEstimate: views.reduce((a, v) => a + v.liveEstimate, 0),
+    cost: views.reduce((a, v) => a + v.cost, 0),
     byAgent: (agent: string) => {
       const mine = views.filter((v) => v.p.agent === agent);
       return { spent: mine.filter((v) => v.status === "approved").reduce((a, v) => a + v.p.amountUsd, 0), n: mine.length, blocked: mine.filter((v) => v.status === "blocked").length };

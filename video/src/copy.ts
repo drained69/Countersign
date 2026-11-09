@@ -1,17 +1,15 @@
 // Every string the video shows inside the rebuilt Tripwire UI, copied from public/*.html and
-// public/*.js. If the app's copy changes, change it here (and only here) to keep the video truthful.
+// public/*.js, using the live-mode (KITE_MODE=kpass, owner signed in) branches of app.js. If the app's copy changes, change it here (and only here) to keep the video truthful.
 
 export const UI = {
   nav: { activity: "Activity", policy: "Policy", replay: "Replay", docs: "Docs", cta: "Connect an agent", dashboard: "Dashboard" },
-  modes: ["SERV mock", "Reppo mock", "Kite mock"],
+  modes: ["SERV live", "Reppo live", "Kite live"],
   hero: {
-    mode: "Scripted demo · simulated payments",
+    mode: "Live · Kite payments",
     title: ["Agent payments,", "under control."],
     lead: "See what your agents want to pay, which checks ran, and why each request was approved, blocked, or held for review.",
-    run: "Run next demo payment",
     view: "View activity",
-    reset: "Reset demo",
-    hint: (left: number) => (left ? `${left} scripted payments left. Each shows a different decision path.` : "All scripted payments complete. Reset to run them again."),
+    hint: "Approved payments use real funds through Kite.",
     strip: "Code rules · SERV · Reppo · your passkey · a receipt for every decision",
     stripLink: "See how checks work ↓",
   },
@@ -41,7 +39,9 @@ export const UI = {
   },
   status: { approved: "Approved", blocked: "Blocked", pending_human: "Needs approval", pending_network: "Checking" } as Record<string, string>,
   tierName: ["Code rules", "SERV", "Reppo", "Passkey"],
-  stepup: (amount: string, name: string) => ({ b: "Step-up requested.", rest: ` Approve ${amount} to ${name}?` }),
+  stepup: (amount: string, name: string) => ({ b: "Step-up requested.", rest: ` Approve ${amount} to ${name}? Approve or decline with your passkey in Kite Passport; nothing is paid until you do.` }),
+  openPasskey: "Open passkey approval →",
+  paidThroughKite: (amount: string) => `Paid through Kite · ${amount}`,
   approve: "Approve",
   decline: "Decline",
   viewReceipt: "View receipt →",
@@ -60,11 +60,11 @@ export const UI = {
       "Block payments to fastcash.example.",
     ],
     compile: "Compile with SERV",
-    compiling: "Compiling with the offline stand-in…",
+    compiling: "SERV is compiling your rules…",
     proposed: "Proposed changes",
     nothingYet: "Nothing compiled yet",
     emptyBody: "Compile your rules to see exactly what would change.",
-    meta: "offline stand-in · 0.0 s · $0.00",
+    meta: "SERV gpt-5.4-mini · 5.8 s · $0.0012",
     willChange: "Will change",
     notApplied: "Not applied: can't be expressed or failed checks",
     changes: ["Cap for new payees: none → $25.00", "Block payee: fastcash.example"],

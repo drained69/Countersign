@@ -1,5 +1,7 @@
 # Tripwire demo video: timing plan
 
+> Updated after the first build: the video now shows the dashboard in live mode (no demo labels; an "Example data · times shortened" note instead), the step-up uses the live "Open passkey approval →" button, step 3 ends on the allowance metrics, and the timings below match `src/timeline.ts`.
+
 120 BPM, so one bar is 2 seconds. Every section starts on a bar line. Total: **70 s (35 bars)**.
 Both cuts (1920x1080 and 1080x1920) share this timeline exactly; only the layout changes.
 

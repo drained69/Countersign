@@ -87,12 +87,12 @@ export const Decision: React.FC<{
           <div className="stepup">
             <p><b>{UI.stepup(usd(p.amountUsd), p.payeeName).b}</b>{UI.stepup(usd(p.amountUsd), p.payeeName).rest}</p>
             <div className="actions">
-              <button className="btn sm approve">{UI.approve}</button>
-              <button className="btn sm decline" data-anchor={a("decline")} style={pressedDecline ? { transform: "translateY(1px) scale(0.96)", background: "#ffb3a522" } : undefined}>{UI.decline}</button>
+              <a className="btn sm approve" data-anchor={a("decline")} style={pressedDecline ? { transform: "translateY(1px) scale(0.96)" } : undefined}>{UI.openPasskey}</a>
             </div>
           </div>
         </Grow>
       ) : null}
+      {v.status === "approved" ? <div className="paid-note" style={{ opacity: prog(t, p.finalAt, 0.4) }}>{UI.paidThroughKite(usd(p.amountUsd))}</div> : null}
       {final ? (
         <div className="feedback-actions" style={{ opacity: prog(t, p.finalAt + 0.2, 0.4) }}>
           <button className="btn text sm">{v.status === "approved" ? UI.reportProblem : UI.wasFine}</button>
@@ -100,7 +100,7 @@ export const Decision: React.FC<{
       ) : null}
       <div className="d-foot">
         <span>
-          {p.clock} · planned tier {p.plannedTier} · checks $0.00{v.liveEstimate > 0 ? ` (≈${usd(v.liveEstimate)} live)` : ""}
+          {p.clock} · planned tier {p.plannedTier} · checks {usd(v.cost)}
         </span>
         <a data-anchor={a("receipt")}>{UI.viewReceipt}</a>
       </div>

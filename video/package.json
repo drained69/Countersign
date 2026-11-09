@@ -5,13 +5,14 @@
   "description": "Product demo video for Tripwire, built with Remotion. Separate from the app, which has zero runtime dependencies.",
   "type": "module",
   "scripts": {
-    "audio": "node scripts/soundtrack.ts",
+    "audio": "node scripts/soundtrack.ts mix && node scripts/soundtrack.ts music && node scripts/soundtrack.ts sfx",
     "studio": "npm run audio && remotion studio src/index.ts",
     "stills": "node scripts/stills.ts",
-    "render:wide": "remotion render src/index.ts Wide out/tripwire-demo-1920x1080.mp4 --codec=h264 --crf=14 --pixel-format=yuv420p --audio-bitrate=320k",
-    "render:tall": "remotion render src/index.ts Tall out/tripwire-demo-1080x1920.mp4 --codec=h264 --crf=14 --pixel-format=yuv420p --audio-bitrate=320k",
-    "render": "npm run audio && npm run render:wide && npm run render:tall",
-    "typecheck": "tsc --noEmit"
+    "render": "npm run audio && npm run cues && npm run render:video && npm run mux",
+    "typecheck": "tsc --noEmit",
+    "cues": "node scripts/cues.ts",
+    "render:video": "remotion render src/index.ts Wide out/_wide-video.mp4 --codec=h264 --crf=14 --pixel-format=yuv420p --muted && remotion render src/index.ts Tall out/_tall-video.mp4 --codec=h264 --crf=14 --pixel-format=yuv420p --muted",
+    "mux": "node scripts/mux.ts"
   },
   "dependencies": {
     "@remotion/cli": "4.0.541",

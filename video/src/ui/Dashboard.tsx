@@ -17,8 +17,7 @@ const Eyebrow: React.FC<{ n: string; children: React.ReactNode }> = ({ n, childr
   <span className="eyebrow"><span className="num">{n}</span>{children}</span>
 );
 
-const Hero: React.FC<DashState> = ({ t, narrow, pressed }) => {
-  const left = 7 - feedAt(t).length;
+const Hero: React.FC<DashState> = ({ narrow, pressed }) => {
   return (
     <section className="hero">
       <div className="hero-card">
@@ -28,11 +27,9 @@ const Hero: React.FC<DashState> = ({ t, narrow, pressed }) => {
             <h1 className="display">{UI.hero.title[0]}<br />{UI.hero.title[1]}</h1>
             <p className="lead">{UI.hero.lead}</p>
             <div className="hero-actions">
-              <button className="btn lime go" data-anchor="run" style={pressed.has("run") ? { transform: "translateY(1px) scale(0.97)" } : undefined}>{UI.hero.run}</button>
-              <a className="btn ghost go">{UI.hero.view}</a>
-              <button className="btn text on-deep">{UI.hero.reset}</button>
+              <a className="btn ghost go" data-anchor="run" style={pressed.has("run") ? { transform: "translateY(1px) scale(0.97)", borderColor: "var(--on-deep)" } : undefined}>{UI.hero.view}</a>
             </div>
-            <p className="hero-hint">{UI.hero.hint(left)}</p>
+            <p className="hero-hint">{UI.hero.hint}</p>
           </div>
           {narrow ? null : (
             <div className="hero-visual">
@@ -85,8 +82,8 @@ const Metrics: React.FC<DashState> = ({ t, narrow }) => {
           </div>
           <div className="card metric">
             <div className="label">{UI.metrics.cost}</div>
-            <div className="value">$0.00</div>
-            <div className="sub">{tot.liveEstimate > 0 ? `≈${usd(tot.liveEstimate)} if every tier ran live` : UI.metrics.costSub}</div>
+            <div className="value">{usd(tot.cost)}</div>
+            <div className="sub">{UI.metrics.costSub}</div>
           </div>
           <div className="card metric">
             <div className="label">{UI.metrics.human}</div>
@@ -99,7 +96,7 @@ const Metrics: React.FC<DashState> = ({ t, narrow }) => {
   );
 };
 
-/** Payee trust rows as calibration changed during the demo run. */
+/** Payee trust rows as calibration changes over the scripted payments. */
 function trustRows(t: number) {
   const rows = KNOWN_PAYEES.map((p) => ({ p, clean: 0, inc: 0, m: 1, isNew: false }));
   const bump = (p: string, at: number, kind: "clean" | "inc") => {
@@ -202,7 +199,7 @@ const Board: React.FC<DashState> = (s) => {
           <div className="feed-status"><span>{UI.board.connection}</span></div>
           <div className="feed" data-anchor="feed">
             {shown.length === 0 ? (
-              <div className="empty"><div className="h3">No payments yet</div><p>Run the first demo payment to see how Tripwire checks it.</p></div>
+              <div className="empty"><div className="h3">No payments yet</div><p>Requests will appear here as your agents submit them.</p></div>
             ) : (
               shown.map((v) => {
                 const isAttack = v.p.id === ATTACK.id;
@@ -420,7 +417,7 @@ export const Nav: React.FC<{ narrow: boolean; current?: "activity" | "receipt"; 
         )}
       </nav>
       <div className="nav-right">
-        {narrow || current === "receipt" ? null : <div className="modes-mini">{UI.modes.map((m) => <span key={m}>{m}</span>)}</div>}
+        {narrow || current === "receipt" ? null : <div className="modes-mini">{UI.modes.map((m) => <span key={m} className="live">{m}</span>)}</div>}
         <button className="theme-toggle"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round"><path d="M20 14.5A8 8 0 0 1 9.5 4 8 8 0 1 0 20 14.5Z" /></svg></button>
         {narrow || current === "receipt" ? null : <a className="btn sm go nav-cta">{UI.nav.cta}</a>}
       </div>

@@ -17,7 +17,7 @@ interface Layout { W: number; H: number; caption: Box; stage: Box; VW: number; V
 
 const LAYOUTS: Record<LayoutName, Layout> = {
   wide: { W: 1920, H: 1080, caption: { x: 0, y: 0, w: 620, h: 1080 }, stage: { x: 620, y: 0, w: 1300, h: 1080 }, VW: 1440, VH: 900, narrow: false, zoom: (z) => z },
-  tall: { W: 1080, H: 1920, caption: { x: 0, y: 0, w: 1080, h: 640 }, stage: { x: 0, y: 640, w: 1080, h: 1280 }, VW: 940, VH: 1150, narrow: true, zoom: (z) => 1 + (z - 1) * 0.72 },
+  tall: { W: 1080, H: 1920, caption: { x: 0, y: 0, w: 1080, h: 640 }, stage: { x: 0, y: 640, w: 1080, h: 1280 }, VW: 940, VH: 1150, narrow: true, zoom: (z) => Math.min(1.2, 1 + (z - 1) * 0.22) },
 };
 
 const C = {
@@ -28,10 +28,10 @@ const C = {
 // ------------------------------------------------------------------ captions
 interface Caption { id: SectionId; n: string; label: string; title: string; line: string }
 const CAPTIONS: Caption[] = [
-  { id: "s1", n: "01", label: "Small payments", title: "Cheap checks for small, known payments.", line: "$0.40 to a known search API passes on code rules alone, in milliseconds." },
-  { id: "s2", n: "02", label: "The attack", title: "A lookalike invoice trips every rung.", line: "Code rules flag the payee, SERV PromptGuard stops the hidden instruction, Reppo says re-evaluate. You get the last word." },
-  { id: "s3", n: "03", label: "Everyday traffic", title: "The real vendor gets paid. The tricks don't.", line: "Reppo accepts the genuine invoice, a split payment is caught as a whole, and a deny-listed payee is blocked instantly." },
-  { id: "s4", n: "04", label: "Receipts", title: "Every decision leaves a receipt.", line: "Each check, what it cost, how long it took, and whether it ran live or as a stand-in." },
+  { id: "s1", n: "01", label: "Small payments", title: "Cheap checks for small, known payments.", line: "Three agents share one $100 Kite allowance. A $0.40 search API call passes on code rules alone, in milliseconds." },
+  { id: "s2", n: "02", label: "The attack", title: "A lookalike invoice trips every rung.", line: "Code rules flag the lookalike payee, SERV PromptGuard catches the hidden instruction, Reppo says re-evaluate. Your passkey has the last word." },
+  { id: "s3", n: "03", label: "Everyday traffic", title: "The real vendor gets paid. The tricks don't.", line: "Reppo accepts the genuine invoice and it's paid. Two small payments are caught as one split, and a deny-listed payee is blocked instantly." },
+  { id: "s4", n: "04", label: "Receipts", title: "Every decision leaves a receipt.", line: "Every check that ran, what it cost, how long it took, and the evidence behind it. Untrusted vendor text is kept, never obeyed." },
   { id: "s5", n: "05", label: "Plain-English policy", title: "Write rules the way you'd tell a person.", line: "You see exactly what would change, and what can't be expressed. Nothing applies until you approve." },
   { id: "s6", n: "06", label: "Does it learn?", title: "Fewer interruptions. Nothing missed.", line: "Six weeks of simulated traffic: 30 of 30 bad payments blocked, none of the good ones, and owner interruptions cut from 14 to 4." },
   { id: "mcp", n: "07", label: "Any agent", title: "One MCP config entry.", line: "Agents pay through tripwire_pay instead of calling Kite directly." },
@@ -72,18 +72,17 @@ const CaptionBlock: React.FC<{ t: number; L: Layout }> = ({ t, L }) => {
   );
 };
 
-const DemoLabel: React.FC<{ t: number; L: Layout }> = ({ t, L }) => {
+const Footnote: React.FC<{ t: number; L: Layout }> = ({ t, L }) => {
   const on = prog(t, CUE.browserIn + 0.3, 0.5) * (1 - prog(t, start("mcp") - 0.2, 0.3));
   if (on <= 0) return null;
   const wide = !L.narrow;
   return (
     <div style={{
       position: "absolute", ...(wide ? { left: 64, bottom: 64 } : { left: 72, top: 30 }), opacity: on,
-      display: "inline-flex", alignItems: "center", gap: 10, padding: wide ? "11px 16px" : "12px 18px", borderRadius: 99, background: "#f6ecd6", color: C.wait,
-      font: `500 ${wide ? 16 : 21}px/1 var(--font-mono)`, letterSpacing: ".08em", textTransform: "uppercase",
+      display: "inline-flex", alignItems: "center", color: "#66726a",
+      font: `500 ${wide ? 14 : 19}px/1 var(--font-mono)`, letterSpacing: ".1em", textTransform: "uppercase",
     }}>
-      <i style={{ width: 8, height: 8, borderRadius: 99, background: "currentColor", display: "block" }} />
-      Demo mode, no real money
+      Example data · times shortened
     </div>
   );
 };
@@ -95,11 +94,28 @@ const LiveNote: React.FC<{ t: number; L: Layout; text: string; from: number; to:
   const wide = !L.narrow;
   return (
     <div style={{
-      position: "absolute", ...(wide ? { left: 64, right: 56, bottom: 140 } : { left: 72, right: 72, top: 560 }), opacity: k, transform: `translateY(${(1 - k) * 10}px)`,
+      position: "absolute", ...(wide ? { left: 64, width: 500, bottom: 140 } : { left: 72, right: 72, top: 560 }), opacity: k, transform: `translateY(${(1 - k) * 10}px)`,
       font: `400 ${wide ? 19 : 25}px/1.4 var(--font-body)`, color: "#66726a", display: "flex", gap: 12, alignItems: "flex-start",
     }}>
       <span style={{ flex: "none", width: wide ? 22 : 28, height: wide ? 22 : 28, borderRadius: 99, background: "#a3486f", color: "#fff", display: "grid", placeItems: "center", font: `600 ${wide ? 12 : 15}px/1 var(--font-mono)`, marginTop: 2 }}>3</span>
       <span>{text}</span>
+    </div>
+  );
+};
+
+/** The owner answers in Kite Passport, which the video doesn't draw: say so in words instead. */
+const Declined: React.FC<{ t: number; L: Layout; at: number }> = ({ t, L, at }) => {
+  const k = pop(t, at - 0.15, 0.4) * (1 - prog(t, at + 1.6, 0.35));
+  if (k <= 0) return null;
+  const wide = !L.narrow;
+  return (
+    <div style={{
+      position: "absolute", left: L.stage.x + L.stage.w / 2, top: wide ? 70 : L.stage.y + 50, transform: `translateX(-50%) scale(${0.85 + 0.15 * k})`, opacity: Math.min(1, k * 1.5), zIndex: 50,
+      display: "inline-flex", alignItems: "center", gap: 14, padding: wide ? "16px 26px" : "20px 32px", borderRadius: 99, background: C.deep, color: "#fff",
+      font: `500 ${wide ? 24 : 30}px/1 var(--font-body)`, boxShadow: "0 24px 60px -20px #13271c99", whiteSpace: "nowrap",
+    }}>
+      <span style={{ width: wide ? 30 : 38, height: wide ? 30 : 38, borderRadius: 99, background: "#a3486f", display: "grid", placeItems: "center", font: `600 ${wide ? 15 : 19}px/1 var(--font-mono)` }}>3</span>
+      Owner declined with their Kite passkey
     </div>
   );
 };
@@ -111,7 +127,7 @@ const VendorNote: React.FC<{ t: number; L: Layout }> = ({ t, L }) => {
   const wide = !L.narrow;
   return (
     <div style={{
-      position: "absolute", ...(wide ? { left: 64, right: 48, top: 640 } : { left: 70, right: 70, top: 1460 }), zIndex: 30,
+      position: "absolute", ...(wide ? { left: 56, width: 520, top: 610 } : { left: 70, right: 70, top: 1460 }), zIndex: 30,
       background: "#fff", border: "1.5px solid #13271c", borderRadius: 10, padding: wide ? "18px 20px" : "24px 26px",
       transform: `rotate(-1deg) scale(${0.9 + 0.1 * k})`, opacity: Math.min(1, k), boxShadow: "0 28px 64px -28px #13271c66",
     }}>
@@ -128,10 +144,11 @@ const Alert: React.FC<{ t: number; L: Layout }> = ({ t, L }) => {
   const k = pop(t, CUE.alertIn, 0.5) * (1 - prog(t, CUE.alertOut - 0.4, 0.4));
   if (k <= 0) return null;
   const wide = !L.narrow;
-  const text = `Tripwire: ${ATTACK.agent} wants to pay $60.00 to ${ATTACK.payeeName} (${ATTACK.payee}) for "${ATTACK.purpose}". Review: http://127.0.0.1:8787/r/${ATTACK.id}`;
+  // server.ts notifyOwner(), live mode: the link is the Kite passkey approval page (not drawn).
+  const text = `Tripwire: ${ATTACK.agent} wants to pay $60.00 to ${ATTACK.payeeName} (${ATTACK.payee}) for "${ATTACK.purpose}". Approve or decline with your passkey: `;
   return (
     <div style={{
-      position: "absolute", zIndex: 35, width: wide ? 520 : 900, ...(wide ? { right: 40, top: 36 } : { left: 90, top: 40 }),
+      position: "absolute", zIndex: 35, width: wide ? 520 : 900, ...(wide ? { right: 40, bottom: 40 } : { left: 90, bottom: 40 }),
       transform: `translateX(${(1 - Math.min(1, k)) * 120}px)`, opacity: Math.min(1, k * 1.5),
       background: "#fff", borderRadius: 18, padding: wide ? "16px 18px" : "22px 24px", boxShadow: "0 30px 70px -24px #13271c77, 0 0 0 1px #13271c14", display: "flex", gap: 14,
     }}>
@@ -140,7 +157,7 @@ const Alert: React.FC<{ t: number; L: Layout }> = ({ t, L }) => {
         <div style={{ display: "flex", justifyContent: "space-between", font: `500 ${wide ? 12.5 : 17}px/1 var(--font-mono)`, letterSpacing: ".1em", textTransform: "uppercase", color: "#66726a" }}>
           <span>Webhook alert</span><span>now</span>
         </div>
-        <div style={{ marginTop: 8, font: `400 ${wide ? 15.5 : 21}px/1.45 var(--font-body)`, color: C.deep, overflowWrap: "anywhere" }}>{text}</div>
+        <div style={{ marginTop: 8, font: `400 ${wide ? 15.5 : 21}px/1.45 var(--font-body)`, color: C.deep, overflowWrap: "anywhere" }}>{text}<span style={{ color: "#66726a" }}>[Kite approval link]</span></div>
       </div>
     </div>
   );
@@ -152,7 +169,7 @@ const SimLabel: React.FC<{ t: number; L: Layout }> = ({ t, L }) => {
   const wide = !L.narrow;
   const big = prog(t, 55.4, 0.6);
   return (
-    <div style={{ position: "absolute", ...(wide ? { left: 64, right: 40, bottom: 140 } : { left: 72, right: 72, top: 520 }), opacity: k }}>
+    <div style={{ position: "absolute", ...(wide ? { left: 64, width: 520, bottom: 140 } : { left: 72, right: 72, top: 520 }), opacity: k }}>
       <div style={{ display: "flex", alignItems: "baseline", gap: 18, opacity: big, transform: `translateY(${(1 - big) * 16}px)` }}>
         <span style={{ font: `600 ${wide ? 76 : 0}px/1 var(--font-body)`, letterSpacing: "-0.05em", color: "#66726a", display: wide ? undefined : "none" }}>14</span>
         <span style={{ font: `500 ${wide ? 50 : 0}px/1 var(--font-body)`, color: C.accent, display: wide ? undefined : "none" }}>→</span>
@@ -268,13 +285,13 @@ const CAMERA: CamKey[] = [
   { t: 26.8, a: "d4-card", z: 1.4 }, { t: 27.7, a: "d4-card", z: 1.4 },
   { t: 28.4, a: "d5-card", z: 1.4 }, { t: 28.9, a: "d5-reasons", z: 1.85 }, { t: 30.1, a: "d5-reasons", z: 1.85 },
   { t: 30.6, a: "d5-decline", z: 1.9, dx: -80 }, { t: 30.95, a: "d5-decline", z: 1.9, dx: -80 }, { t: 31.4, a: "d5-card", z: 1.4 }, { t: 31.9, a: "d5-card", z: 1.4 },
-  { t: 32.35, a: "d6-card", z: 1.55 }, { t: 33.3, a: "d6-card", z: 1.55 }, { t: 34.0, a: "feedcard", z: 1, dy: -200 },
+  { t: 32.35, a: "d6-card", z: 1.55 }, { t: 32.95, a: "d6-card", z: 1.55 }, { t: 33.45, a: "m-spent", z: 1.3, dx: 260 }, { t: 34.0, a: "m-spent", z: 1.3, dx: 260 },
   // 4 · receipt
-  { t: 34.3, a: "feedcard", z: 1, dy: -200 }, { t: 34.7, a: "tab-Blocked", z: 1.5, dx: -150 }, { t: 35.1, a: "tab-Blocked", z: 1.5, dx: -150 },
+  { t: 34.4, a: "feedcard", z: 1, dy: -200 }, { t: 34.7, a: "tab-Blocked", z: 1.5, dx: -150 }, { t: 35.1, a: "tab-Blocked", z: 1.5, dx: -150 },
   { t: 35.7, a: "d2-receipt", z: 1.6, dx: -200 }, { t: 36.1, a: "d2-receipt", z: 1.6, dx: -200 },
   { t: 36.35, z: 1 }, { t: 36.6, z: 1 },
   { t: 37.1, a: "r-step-0", z: 1.55 }, { t: 37.6, a: "r-step-1", z: 1.55 }, { t: 38.1, a: "r-step-2", z: 1.55 }, { t: 38.6, a: "r-step-3", z: 1.55 },
-  { t: 39.2, a: "r-facts-3", z: 2.1, dx: 120 }, { t: 40.2, a: "r-facts-3", z: 2.1, dx: 120 },
+  { t: 39.2, a: "r-step-3", z: 1.9 }, { t: 40.2, a: "r-step-3", z: 1.9 },
   { t: 40.9, a: "r-context", z: 1.5 }, { t: 41.7, a: "r-context", z: 1.5 },
   // 5 · policy
   { t: 42.0, z: 1 }, { t: 42.3, z: 1 }, { t: 42.8, a: "policy-input", z: 1.45 }, { t: 47.0, a: "policy-input", z: 1.45 },
@@ -283,7 +300,7 @@ const CAMERA: CamKey[] = [
   // 6 · replay
   { t: 52.4, z: 1 }, { t: 53.1, a: "kpis", z: 1.25 }, { t: 54.4, a: "kpis", z: 1.25 },
   { t: 55.0, a: "kpi-int", z: 2.3 }, { t: 57.0, a: "kpi-int", z: 2.3 },
-  { t: 57.6, a: "chart", z: 1.35 }, { t: 59.6, a: "chart", z: 1.35 }, { t: 60.4, z: 1 },
+  { t: 57.6, a: "chart", z: 1.4 }, { t: 59.6, a: "chart", z: 1.4 }, { t: 60.4, z: 1 },
 ];
 
 const POINTER: PtrKey[] = [
@@ -303,8 +320,8 @@ const CLICKS = [CUE.runClick, CUE.declineClick, CUE.p6DeclineClick, CUE.blockedT
 /** Scroll position of each page (in page pixels), keyed to anchors so it survives layout changes. */
 const SCROLL: Record<"dash" | "receipt", { t: number; a?: string; off?: number; y?: number }[]> = {
   dash: [
-    { t: 5.75, y: 0 }, { t: 6.35, a: "feedcard", off: -96 }, { t: 34.0, a: "feedcard", off: -96 },
-    { t: 35.05, a: "feedcard", off: -96 }, { t: 35.55, a: "d2-card", off: -330 }, { t: 41.0, a: "d2-card", off: -330 },
+    { t: 5.75, y: 0 }, { t: 6.35, a: "feedcard", off: -200 }, { t: 32.95, a: "feedcard", off: -200 }, { t: 33.45, a: "metrics", off: -120 }, { t: 34.0, a: "metrics", off: -120 },
+    { t: 34.4, a: "feedcard", off: -200 }, { t: 35.05, a: "feedcard", off: -200 }, { t: 35.55, a: "d2-card", off: -330 }, { t: 41.0, a: "d2-card", off: -330 },
     { t: 41.01, a: "policy-section", off: -60 }, { t: 52.15, a: "policy-section", off: -60 }, { t: 52.9, a: "replay-section", off: -60 },
   ],
   receipt: [{ t: 36.6, y: 0 }, { t: 37.0, a: "r-timeline", off: -110 }],
@@ -332,8 +349,25 @@ export const Video: React.FC<{ layout: LayoutName }> = ({ layout }) => {
   const pad = L.narrow ? 36 : 44;
   const k = Math.min((L.stage.w - 2 * pad) / FW, (L.stage.h - 2 * pad) / FH);
 
-  const scrollDash = resolveScroll(t, "dash", anchors);
-  const scrollRec = resolveScroll(t, "receipt", anchors);
+  // Wide: the camera pushes in. Tall: the camera stays top-locked and centred, and the page scrolls
+  // so that each camera target sits in the upper part of the visible area instead.
+  const tallScroll = (page: "dash" | "receipt") => {
+    const base = SCROLL[page].map((k2) => {
+      const r = k2.a ? anchors[k2.a] : undefined;
+      return { t: k2.t, v: Math.max(0, r ? r.y - CHROME_H + (k2.off ?? 0) : k2.y ?? 0) };
+    });
+    const top = CHROME_H + 68;
+    const cam = CAMERA.filter((c) => c.a && anchors[c.a]?.page === page).map((c) => {
+      const r = anchors[c.a!];
+      const visH = L.stage.h / (k * L.zoom(c.z)) - top - 40;
+      const focus = r.h > visH * 0.7 ? r.y + Math.min(r.h, visH) * 0.35 : r.y + r.h / 2;
+      return { t: c.t, v: Math.max(0, focus + (c.dy ?? 0) - (top + visH * 0.42)) };
+    });
+    const keys = [...base, ...cam].sort((a, b) => a.t - b.t);
+    return keyed(t, keys);
+  };
+  const scrollDash = L.narrow ? tallScroll("dash") : resolveScroll(t, "dash", anchors);
+  const scrollRec = L.narrow ? tallScroll("receipt") : resolveScroll(t, "receipt", anchors);
   const showReceipt = t >= PAGE_SWITCH.toReceipt && t < PAGE_SWITCH.toDash;
   const pageFade = showReceipt ? prog(t, PAGE_SWITCH.toReceipt, 0.3) : prog(t, PAGE_SWITCH.toDash, 0.3);
 
@@ -358,6 +392,7 @@ export const Video: React.FC<{ layout: LayoutName }> = ({ layout }) => {
   const hw = L.stage.w / 2 / (k * z), hh = L.stage.h / 2 / (k * z);
   cx = FW > 2 * hw ? Math.min(FW - hw, Math.max(hw, cx)) : FW / 2;
   cy = FH > 2 * hh ? Math.min(FH - hh, Math.max(hh, cy)) : FH / 2;
+  if (L.narrow) { cx = FW / 2; cy = FH > 2 * hh ? hh : FH / 2; }
 
   // Browser entrance + MCP exit
   const enter = pop(t, CUE.browserIn, 0.7);
@@ -398,7 +433,7 @@ export const Video: React.FC<{ layout: LayoutName }> = ({ layout }) => {
       out[n.dataset.anchor!] = { x: (r.left - fr.left) / sc, y: (r.top - fr.top) / sc + scrollY, w: r.width / sc, h: r.height / sc, scrolled: Boolean(page), page: page?.dataset.page };
     });
     const same = Object.keys(out).length === Object.keys(anchors).length &&
-      Object.entries(out).every(([key, r]) => anchors[key] && Math.abs(anchors[key].x - r.x) < 0.5 && Math.abs(anchors[key].y - r.y) < 0.5 && Math.abs(anchors[key].h - r.h) < 0.5);
+      Object.entries(out).every(([key, r]) => anchors[key] && Math.abs(anchors[key].x - r.x) < 2 && Math.abs(anchors[key].y - r.y) < 2 && Math.abs(anchors[key].h - r.h) < 2);
     if (!same) setAnchors(out);
   });
 
@@ -426,7 +461,7 @@ export const Video: React.FC<{ layout: LayoutName }> = ({ layout }) => {
             backgroundImage: "linear-gradient(#13271c0c 1px, transparent 1px), linear-gradient(90deg, #13271c0c 1px, transparent 1px)", backgroundSize: "44px 44px", overflow: "hidden",
             borderRadius: L.narrow ? "40px 40px 0 0" : "40px 0 0 40px",
           }}>
-            <div style={{ position: "absolute", left: tx - L.stage.x, top: ty - L.stage.y, transform: `scale(${s})`, transformOrigin: "0 0", opacity: Math.min(1, enter * 1.2) * (1 - exitP * 0.85) }}>
+            <div style={{ position: "absolute", left: tx - L.stage.x, top: ty - L.stage.y, transform: `scale(${s})`, transformOrigin: "0 0", opacity: Math.min(1, enter * 1.2) * (1 - exitP) }}>
               <BrowserFrame width={L.VW} height={L.VH} url={url} frameRef={frameRef}>
                 <div data-page="dash" data-scrolly={scrollDash} style={{ position: "absolute", inset: 0, opacity: showReceipt ? 1 - pageFade : t >= PAGE_SWITCH.toDash ? pageFade : 1 }}>
                   <div style={{ transform: `translateY(${-scrollDash + 68}px)` }}>
@@ -457,7 +492,7 @@ export const Video: React.FC<{ layout: LayoutName }> = ({ layout }) => {
                     <div key="res" style={{ opacity: r2, marginTop: 10, paddingLeft: 18, borderLeft: `3px solid ${C.lime}` }}>
                       <div><span style={{ color: C.lime, fontWeight: 600 }}>APPROVED</span>: $0.40 to {P1.payeeName} ({P1.payee}).</div>
                       <div style={dim}>- Tier 0 Deterministic rules [live]: pass. Known payee, within caps, no duplicates.</div>
-                      <div>Paid (ref mock-tx-{P1.id}).</div>
+                      <div>Paid.</div>
                     </div>,
                   ]}
                 />
@@ -466,8 +501,10 @@ export const Video: React.FC<{ layout: LayoutName }> = ({ layout }) => {
             <Alert t={t} L={L} />
           </div>
           <CaptionBlock t={t} L={L} />
-          <DemoLabel t={t} L={L} />
-          <LiveNote t={t} L={L} text="In the demo you approve on the Tripwire dashboard. In live mode, it's your Kite passkey." from={CUE.p3Passkey - 0.2} to={end("s2")} />
+          <Footnote t={t} L={L} />
+          <LiveNote t={t} L={L} text="The passkey prompt opens in Kite Passport. Nothing is paid until you approve." from={CUE.p3Passkey - 0.2} to={end("s2")} />
+          <Declined t={t} L={L} at={CUE.p3Blocked} />
+          <Declined t={t} L={L} at={CUE.p6Blocked} />
           <VendorNote t={t} L={L} />
           <SimLabel t={t} L={L} />
         </AbsoluteFill>

@@ -1,10 +1,13 @@
 // Writes public/soundtrack.wav: an original score plus interface sounds, synthesized from scratch,
 // so there is nothing to license. Every section and sound is timed from src/timeline.ts.
-// Run: node scripts/soundtrack.ts
+// Run: node scripts/soundtrack.ts [mix|music|sfx]   (npm run audio writes all three)
+// The stems share one gain, so music.wav + sfx.wav line up with soundtrack.wav and can be
+// swapped for another score (for example a Higgsfield track at 120 BPM).
 import { writeFileSync, mkdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { BAR, BEAT, DURATION, SECTIONS, SFX, type Mood, type Sfx } from "../src/timeline.ts";
 
+const STEM = (process.argv[2] ?? "mix") as "mix" | "music" | "sfx";
 const SR = 44100;
 const N = Math.ceil((DURATION + 0.5) * SR);
 const L = new Float32Array(N), R = new Float32Array(N);
@@ -141,7 +144,7 @@ function drone(note: number, t0: number, dur: number, amp: number) {
 }
 
 // ---------------------------------------------------------------- arrangement
-for (const b of bars) {
+if (STEM !== "sfx") for (const b of bars) {
   const [root, ...voices] = b.chord;
   const lastBar = b.index === bars.length - 1;
   const dark = b.mood === "dark", lift = b.mood === "lift", intro = b.mood === "intro", resolve = b.mood === "resolve";
@@ -189,7 +192,7 @@ for (const b of bars) {
 }
 // Darker moment: a drone under the whole attack section.
 const darkSec = SECTIONS.find((s) => s.mood === "dark")!;
-drone(23, darkSec.bar * BAR, darkSec.bars * BAR + 0.4, 0.05); // B0 + fifth wobble
+if (STEM !== "sfx") drone(23, darkSec.bar * BAR, darkSec.bars * BAR + 0.4, 0.05); // B0 + fifth wobble
 
 // ---------------------------------------------------------------- interface sounds
 function sfx(e: Sfx) {
@@ -249,7 +252,7 @@ function sfx(e: Sfx) {
     }
   }
 }
-for (const e of SFX) sfx(e);
+if (STEM !== "music") for (const e of SFX) sfx(e);
 
 // ---------------------------------------------------------------- effects
 // Ping-pong dotted-eighth delay on plucks.
@@ -295,7 +298,7 @@ for (let i = 0; i < N; i++) {
   R[i] = Math.tanh(R[i] * 1.4) * fadeIn * fadeOut;
   peak = Math.max(peak, Math.abs(L[i]), Math.abs(R[i]));
 }
-const norm = 0.89 / peak; // about -1 dBFS
+const norm = 0.95; // one fixed gain for the mix and both stems (mix peaks about -1 dBFS)
 const out = Buffer.alloc(44 + N * 4);
 out.write("RIFF", 0); out.writeUInt32LE(36 + N * 4, 4); out.write("WAVE", 8);
 out.write("fmt ", 12); out.writeUInt32LE(16, 16); out.writeUInt16LE(1, 20); out.writeUInt16LE(2, 22);
@@ -307,5 +310,6 @@ for (let i = 0; i < N; i++) {
 }
 const dir = fileURLToPath(new URL("../public/", import.meta.url));
 mkdirSync(dir, { recursive: true });
-writeFileSync(`${dir}soundtrack.wav`, out);
-console.log(`soundtrack.wav: ${DURATION}s, ${bars.length} bars at ${60 / BEAT} BPM, ${SFX.length} interface sounds, peak normalised from ${peak.toFixed(2)}`);
+const name = STEM === "mix" ? "soundtrack" : STEM;
+writeFileSync(`${dir}${name}.wav`, out);
+console.log(`${name}.wav: ${DURATION}s, ${bars.length} bars at ${60 / BEAT} BPM, ${SFX.length} interface sounds, peak normalised from ${peak.toFixed(2)}`);
