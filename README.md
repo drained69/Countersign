@@ -14,7 +14,11 @@ Allowances let your agents spend without asking. Tripwire makes sure they should
 ![Dependencies](https://img.shields.io/badge/runtime%20dependencies-0-brightgreen)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-[Getting started](#getting-started) · [Documentation](#documentation) · [API](docs/api.md) · [Contributing](CONTRIBUTING.md)
+[Live demo](https://tripwirev1.up.railway.app) · [Getting started](#getting-started) · [Documentation](#documentation) · [API](docs/api.md) · [Contributing](CONTRIBUTING.md)
+
+<br />
+
+<img src="docs/assets/dashboard.png" alt="Tripwire dashboard: a payment ladder of code rules, SERV, Reppo and a Kite passkey, with a receipt for every decision" width="900" />
 
 </div>
 
@@ -239,7 +243,8 @@ tripwire/
 ├── public/                 dashboard, receipt and docs pages
 ├── scripts/                demo, replay and doctor commands
 ├── test/                   node:test suites
-└── docs/                   detailed documentation
+├── docs/                   detailed documentation
+└── video/                  Remotion project for the demo video
 ```
 
 Full layout with every file: [docs/architecture.md](docs/architecture.md#project-layout).

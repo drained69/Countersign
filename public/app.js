@@ -312,6 +312,7 @@ function renderTrust(policy, stats) {
       <td class="num">${usd(policy.tier2MinUsd * m)}</td>
     </tr>`;
   });
+  if (!rows.length) rows.push('<tr><td colspan="4" class="muted">No payees yet. Trust builds as payments are checked.</td></tr>');
   $("trust").innerHTML = `<thead><tr><th>Payee</th><th class="num" title="Clean signals / incidents">OK/Inc</th><th class="num">Mult</th><th class="num" title="Reppo threshold for this payee">Reppo ≥</th></tr></thead><tbody>${rows.join("")}</tbody>`;
 }
 
@@ -702,6 +703,15 @@ function drawChart() {
 document.addEventListener("themechange", drawChart);
 matchMedia("(prefers-color-scheme: dark)").addEventListener("change", drawChart);
 
+// Number the visible sections in order, so hiding owner-only ones leaves no gaps.
+function numberSections() {
+  let n = 0;
+  for (const num of document.querySelectorAll("main .section .eyebrow .num")) {
+    if (num.closest("[hidden]")) continue;
+    num.textContent = String(++n).padStart(2, "0");
+  }
+}
+
 async function boot() {
   session = await (await checked(await api("/api/session"))).json();
   owner = session.role === "owner";
@@ -710,6 +720,7 @@ async function boot() {
   $("logout").hidden = !(owner && (session.authRequired || session.publicLive));
   if (session.authRequired && !owner) return showLogin();
   for (const el of document.querySelectorAll("[data-owner-only]")) el.hidden = !owner;
+  numberSections();
   await refresh();
   loadReplay();
   connect();

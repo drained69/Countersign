@@ -1,0 +1,46 @@
+name: Bug report
+description: Something in Tripwire doesn't work as documented.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. **Security issues go to [SECURITY.md](https://github.com/drained69/Tripwire/blob/main/SECURITY.md), not here.** Never paste API keys, owner tokens or agent keys.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. npm start
+        2. Press "Run next demo payment"
+        3. …
+    validations:
+      required: true
+  - type: dropdown
+    id: mode
+    attributes:
+      label: Mode
+      options:
+        - Scripted demo (mock)
+        - Live (KITE_MODE=kpass)
+        - Public demo
+    validations:
+      required: true
+  - type: input
+    id: node
+    attributes:
+      label: Node.js version
+      placeholder: v24.x
+  - type: textarea
+    id: receipt
+    attributes:
+      label: Receipt or logs
+      description: The receipt JSON from /api/receipts/<id> or server output, with any secrets removed.
+      render: text

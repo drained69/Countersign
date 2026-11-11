@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/drained69/Tripwire/security/policy
+    about: Please report vulnerabilities privately, not in public issues.
+  - name: Live demo
+    url: https://tripwirev1.up.railway.app
+    about: Try Tripwire in the browser.
