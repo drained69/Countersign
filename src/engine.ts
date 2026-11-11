@@ -276,11 +276,14 @@ export class Engine {
     const sessionId = this.stepUpSessions.get(receipt.intent.id);
     this.stepUpSessions.delete(receipt.intent.id);
     const idempotencyKey = randomUUID();
+    // Public visitors run Tiers 0 and 1 live (real SERV call) but execute Tier 2 in mock — the
+    // server's kpass is not signed in as a real person and cannot move money on their behalf.
+    const execMode: KiteMode = receipt.intent.agentId === "public-visitor" ? "mock" : this.cfg.kiteMode;
     receipt.status = "paying";
-    receipt.payment = { executed: false, state: "unknown", mode: this.cfg.kiteMode === "kpass" ? "live" : "mock", idempotencyKey, sessionId };
+    receipt.payment = { executed: false, state: "unknown", mode: execMode === "kpass" ? "live" : "mock", idempotencyKey, sessionId };
     this.onChange?.(receipt, true);
 
-    const result = await executePayment(receipt.intent, this.cfg.kiteMode, { sessionId, idempotencyKey, kite: this.cfg.kite ?? DEFAULT_KITE });
+    const result = await executePayment(receipt.intent, execMode, { sessionId, idempotencyKey, kite: this.cfg.kite ?? DEFAULT_KITE });
     this.applyPayment(receipt, result);
     return receipt;
   }
