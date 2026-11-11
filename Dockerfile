@@ -33,4 +33,4 @@ RUN mkdir -p /data/home
 ENV HOME=/data/home
 
 EXPOSE 8787
-CMD ["sh", "-c", "mkdir -p \"$HOME\" && exec node src/server.ts"]
+CMD ["sh", "-c", "mkdir -p \"$HOME\" && kpass agent:register --type agent --output json >/tmp/kpass-register.json 2>&1 || cat /tmp/kpass-register.json; exec node src/server.ts"]
