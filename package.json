@@ -39,7 +39,7 @@
     "serv:bench": "node scripts/serv-bench.ts"
   },
   "devDependencies": {
-    "@types/node": "25.9.9",
+    "@types/node": "26.6.6",
     "typescript": "5.9.3"
   }
 }
